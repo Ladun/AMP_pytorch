@@ -2,13 +2,13 @@
 import torch
 from torch import nn
 
-from models.functions import *
+from .functions import *
 
 class Discriminator(nn.Module):
     def __init__(self, config):
         super().__init__()
 
-        hidden_dim = config.gail.hidden_dim
+        hidden_dim = config.train.gail.hidden_dim
         self.m = nn.Sequential(
             nn.Linear(config.env.state_dim * 2, hidden_dim),
             nn.Tanh(),
@@ -29,6 +29,6 @@ class Discriminator(nn.Module):
     def get_reward(self, state, next_state):
         prob = self(state, next_state)
         
-        reward = torch.max(0, 1 - 0.25 * torch.pow(prob - 1, 2))
+        reward = torch.clamp(1 - 0.25 * torch.pow(prob - 1, 2), min=0)
         
         return reward

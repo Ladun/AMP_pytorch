@@ -84,14 +84,15 @@ class ReplayBuffer:
         v_target = advantage + value[:steps]
         
         storage = {
-            "state"     : state,
-            "reward"    : reward,
-            "action"    : action,
-            "logprob"   : logprob,
-            "done"      : done,
-            "value"     : value,
-            "advant"    : advantage,
-            "v_target"  : v_target
+            "state"      : state,
+            "next_state" : state[1:], 
+            "reward"     : reward,
+            "action"     : action,
+            "logprob"    : logprob,
+            "done"       : done,
+            "value"      : value,
+            "advant"     : advantage,
+            "v_target"   : v_target
         }
         # The first two values ​​refer to the trajectory length and number of envs.
         return {k: v[:steps].reshape(-1, *v.size()[2:]) for k, v in storage.items()}

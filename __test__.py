@@ -3,10 +3,16 @@ import tqdm
 import numpy as np
 from numpngw import write_apng
 from collections import deque
+import glob
+import os
+
+import gymnasium as gym
+from gymnasium.vector import AsyncVectorEnv
 
 import custom_env
 from algo.utils.general import TimerManager
-from algo.data.preprocess_data import parse_amc
+from algo.data.preprocess_data import parse_amc, parse_asf, create_joint_mapping, parse_humanoid_xml
+from algo.data.motion_dataset import MotionDataset
 
 def get_inference_video(frame, total_time, vid_name="render.png"):
     timestep = 1. / frame
@@ -44,6 +50,9 @@ def env_test():
     timer_manager = TimerManager()
     env =  gymnasium.make("HumanoidBulletEnv-v0", env_config={"render_mode":"human"})
     env.reset()
+    
+    print(env.robot.action_space.shape)
+    print(env.observation_space)
 
     try:
         env.reset()
@@ -69,20 +78,6 @@ def env_test():
 # images = get_inference_video(240, 1)
 # print(len(images))
 
-# env_test()
+env_test()
 
-class Buffer:
-    def __init__(self):
-        self.a = []
-        self.b = []
-        
-    def add(self, **d):
-        for k, v in d.items():
-            self.__dict__[k].append(v)
-        
-
-b = Buffer()
-
-b.add(a=1,b=2)
-
-print(b.a, b.b)
+# motion_dataset = MotionDataset("data", "data/asf")

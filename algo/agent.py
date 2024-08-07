@@ -18,16 +18,17 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
-from models.policy import ActorCritic
-from models.discriminator import Discriminator
-from data.motion_dataset import MotionDataset
-from scheduler import WarmupLinearSchedule
-from replay_buffer import ReplayBuffer
-from utils.general import (
+from .models.policy import ActorCritic
+from .models.discriminator import Discriminator
+from .data.motion_dataset import MotionDataset
+from .scheduler import WarmupLinearSchedule
+from .replay_buffer import ReplayBuffer
+from .utils.general import (
     set_seed, pretty_config, get_cur_time_code,
+    get_config, get_rng_state, set_rng_state,
     TimerManager, get_device
 )
-from utils.stuff import RewardScaler, ObservationNormalizer
+from .utils.stuff import RewardScaler, ObservationNormalizer
 
 logger = logging.getLogger(__name__)
 
@@ -52,13 +53,12 @@ class AMPAgent:
         self.device = get_device(config.device)
         
         set_seed(self.config.seed)
-        rng_state, _ = gym.utils.seeding.np_random(self.config.seed)
-        self.env_rng_state = rng_state
+        
         
         # -------- Define models --------
         
         self.network = ActorCritic(config, self.device).to(self.device) 
-        self.disc = Discriminator(config)
+        self.disc = Discriminator(config).to(self.device) 
         
         # -------- Define train supporter ---------
                
@@ -69,7 +69,7 @@ class AMPAgent:
         
         self.disc_optimizer  = torch.optim.Adam([
             {'params': self.disc.parameters(),
-            **config.gail.optimizer}
+            **config.train.gail.optimizer}
         ])
         
         if self.config.train.scheduler:
@@ -90,9 +90,8 @@ class AMPAgent:
             self.obs_normalizer = ObservationNormalizer(self.config.env.num_envs, sp)
             
         # Disriminator dataset
-        self.motion_dataset = MotionDataset(self.config.expert.data_dir, 
-                                            self.config.expert.asf_file,
-                                            self.config.expert.mujoco_xml_file)
+        self.motion_dataset = MotionDataset(self.config.train.gail.data_dir, 
+                                            self.config.train.gail.asf_dir)
         
         
         self.timer_manager  = TimerManager()
@@ -104,14 +103,100 @@ class AMPAgent:
         pretty_config(config, logger=logger)
         logger.info(f"Device: {self.device}")
     
-    def save(self, ckpt_path):
-        pass
+    def save(self, postfix):
+        '''
+        ckpt_root
+            exp_name
+                config.yaml
+                checkpoints
+                    1
+                    2
+                    ...
+                
+        '''
+
+        ckpt_path = os.path.join(self.config.experiment_path, "checkpoints")
+        if os.path.exists(ckpt_path):
+            # In order to save only the maximum number of checkpoints as max_save_store,
+            # checkpoints exceeding that number are deleted. (exclude 'best')
+            current_ckpt = [f for f in os.listdir(ckpt_path) if f.startswith('timesteps')]
+            current_ckpt.sort(key=lambda x: int(x[9:]))
+            # Delete exceeded checkpoints
+            if self.config.train.max_ckpt_count > 0 and self.config.train.max_ckpt_count <= len(current_ckpt):
+                for ckpt in current_ckpt[:len(current_ckpt) - self.config.train.max_ckpt_count - 1]:
+                    shutil.rmtree(os.path.join(self.config.experiment_path, "checkpoints", ckpt), ignore_errors=True)
+
+        # Save configuration file
+        os.makedirs(self.config.experiment_path, exist_ok=True)
+        with open(os.path.join(self.config.experiment_path, "config.yaml"), 'w') as fp:
+            OmegaConf.save(config=self.config, f=fp)
+
+        # postfix is ​​a variable for storing each episode or the best model
+        ckpt_path = os.path.join(ckpt_path, postfix)
+        os.makedirs(ckpt_path, exist_ok=True)
+        
+        # save model and optimizers
+        torch.save(self.network.state_dict(), os.path.join(ckpt_path, "network.pt"))
+        torch.save(self.optimizer.state_dict(), os.path.join(ckpt_path, "optimizer.pt"))
+        
+        torch.save(self.disc.state_dict(), os.path.join(ckpt_path, "discriminator.pt"))
+        torch.save(self.disc_optimizer.state_dict(), os.path.join(ckpt_path, "disc_optimizer.pt"))
+        
+        if self.config.train.scheduler:
+            torch.save(self.scheduler.state_dict(), os.path.join(ckpt_path, "scheduler.pt"))
+            torch.save(self.disc_scheduler.state_dict(), os.path.join(ckpt_path, "disc_scheduler.pt"))
+
+        if self.config.train.reward_scaler:
+            self.reward_scaler.save(ckpt_path)
+        if self.config.train.observation_normalizer:
+            self.obs_normalizer.save(ckpt_path)
+
+        # save random state
+        torch.save(get_rng_state(), os.path.join(ckpt_path, 'rng_state.pkl'))
+
+        with open(os.path.join(ckpt_path, "appendix"), "w") as f:
+            f.write(f"{self.timesteps}\n")
     
-    def load(self, ckpt_path):
-        pass
+    
+    @classmethod
+    def load(cls, experiment_path, postfix, resume=True):
+
+        config = get_config(os.path.join(experiment_path, "config.yaml"))
+        config.network.action_std_init = config.network.min_action_std
+        amp_algo = AMPAgent(config)
+        
+        # Create a variable to indicate which path the model will be read from
+        ckpt_path = os.path.join(experiment_path, "checkpoints", postfix)
+        print(f"Load pretrained model from {ckpt_path}")
+
+        amp_algo.network.load_state_dict(torch.load(os.path.join(ckpt_path, "network.pt")))
+        amp_algo.optimizer.load_state_dict(torch.load(os.path.join(ckpt_path, "optimizer.pt")))
+        
+        amp_algo.disc.load_state_dict(torch.load(os.path.join(ckpt_path, "discriminator.pt")))
+        amp_algo.disc_optimizer.load_state_dict(torch.load(os.path.join(ckpt_path, "disc_optimizer.pt")))
+        
+        if amp_algo.config.train.scheduler:
+            amp_algo.scheduler.load_state_dict(torch.load(os.path.join(ckpt_path, "scheduler.pt")))
+            amp_algo.disc_scheduler.load_state_dict(torch.load(os.path.join(ckpt_path, "disc_scheduler.pt")))
+        
+        if amp_algo.config.train.reward_scaler:
+            amp_algo.reward_scaler.load(ckpt_path)
+        if amp_algo.config.train.observation_normalizer:
+            amp_algo.obs_normalizer.load(ckpt_path)
+
+        # load random state
+        set_rng_state(torch.load(os.path.join(ckpt_path, 'rng_state.pkl'), map_location='cpu'))
+
+        with open(os.path.join(ckpt_path, "appendix"), "r") as f:
+            lines = f.readlines()
+
+        if resume:
+            amp_algo.timesteps = int(lines[0])
+
+        return amp_algo
      
     def optimize_policy(self, data):
-        data_loader = data_iterator(self.config.policy.batch_size, data)   
+        data_loader = data_iterator(self.config.train.ppo.batch_size, data)   
 
         policy_losses   = []
         entropy_losses  = []
@@ -120,7 +205,7 @@ class AMPAgent:
         
         c2 = self.config.train.ppo.coef_entropy_penalty
         for batch in data_loader:
-            ob, ac, old_logp, adv, vtarg, old_v = batch
+            ob, _, ac, old_logp, adv, vtarg, old_v = batch
             adv = (adv - adv.mean()) / (adv.std() + 1e-7)
 
             # -------- Loss calculate --------
@@ -193,9 +278,10 @@ class AMPAgent:
 
 
     def optimize_discriminator(self, data):
-        expert_loader = DataLoader(self.dataset, 
+        expert_loader = DataLoader(self.motion_dataset, 
                                    batch_size=self.config.train.gail.batch_size,
-                                   shuffle=True)    
+                                   shuffle=True)  
+        expert_loader = iter(expert_loader) 
         agent_loader  = data_iterator(self.config.train.gail.batch_size, data)    
     
         loss_fn = nn.MSELoss()
@@ -204,8 +290,12 @@ class AMPAgent:
         expert_accuracies = []
         
         self.disc.train()
-        for expert_ob, expert_next_ob in expert_loader:
-            ob, next_ob = next(agent_loader)[:2]
+        for agent_data in agent_loader:
+            ob, next_ob = agent_data[:2]
+            ob, next_ob = ob.to(self.device), next_ob.to(self.device)
+            expert_ob, expert_next_ob = next(expert_loader)
+            expert_ob, expert_next_ob = expert_ob.to(self.device), expert_next_ob.to(self.device)
+            
 
             agent_prob = self.disc(ob, next_ob)
             expert_prob = self.disc(expert_ob, expert_next_ob)
@@ -247,17 +337,13 @@ class AMPAgent:
         data = self.memory.compute_gae_and_get(next_state, next_value, done)
           
         s        = data['state'].float()
+        ns       = data['next_state'].float()
         a        = data['action']
         logp     = data['logprob'].float()
         v_target = data['v_target'].float()
         adv      = data['advant'].float()
         v        = data['value'].float()
-        
-        print(s.shape)
-        ns = torch.cat([s, torch.from_numpy(ns).to(self.device).unsqueeze(0)], dim=0)
-        ns = ns[1:]
-        print(ns.shape)
-        
+                
         return s, ns, a, logp, v_target, adv, v
     
     def optimize(self, next_state, done):     
@@ -280,13 +366,13 @@ class AMPAgent:
         }
         
         with self.timer_manager.get_timer("Backpropagation"):                
-            for _ in range(self.config.train.gail.epoch):
+            for _ in range(self.config.train.gail.epochs):
                 disc_metric = self.optimize_discriminator(data)
                 
                 for k, v in disc_metric.items():
                     metrics[k].extend(v)
                     
-            for _ in range(self.config.train.ppo.optim_epochs):
+            for _ in range(self.config.train.ppo.epochs):
                 policy_metric = self.optimize_policy(data)
                 
                 for k, v in policy_metric.items():
@@ -314,6 +400,7 @@ class AMPAgent:
         
         episodic_rewards = []
         durations = []
+        done = np.zeros(self.config.env.num_envs)
         
         w_g = self.config.train.coef_task_specific
         w_s = self.config.train.coef_task_agnostic      
@@ -347,18 +434,19 @@ class AMPAgent:
             episodic_reward += reward
             duration += 1
             
-            style_reward = self.disc.get_reward(state, torch.from_numpy(state).to(self.device, dtype=torch.float))            
-            print(f"Reward: {reward.shape}, {style_reward.shape}")
-            reward = w_g * reward + w_s * style_reward
+            with torch.no_grad():
+                style_reward = self.disc.get_reward(state, torch.from_numpy(next_state).to(self.device, dtype=torch.float))
+                style_reward = style_reward.squeeze(1).cpu().numpy()       
+            total_reward = w_g * reward + w_s * style_reward
 
             if self.config.train.reward_scaler:
-                reward = self.reward_scaler(reward, terminated + truncated)
+                total_reward = self.reward_scaler(total_reward, terminated + truncated)
                 
             # add experience to the memory                    
             self.memory.store(
                 state=state,
                 action=action,
-                reward=reward,
+                reward=total_reward,
                 done=done,
                 value=values,
                 logprob=logprobs
@@ -385,10 +473,7 @@ class AMPAgent:
         
     def train(self, envs, exp_name=None):
     
-        # Set random state for reproducibility
-        envs.np_random = self.env_rng_state
         start_time = datetime.now().replace(microsecond=0)
-        
         
         # ==== Create an experiment directory to record training data ============
         
@@ -441,7 +526,6 @@ class AMPAgent:
         ===========  ==========================  ==================
         '''
         next_state, _  = envs.reset()
-        done = np.zeros(self.config.env.num_envs)
         self.next_action_std_decay_step = self.config.network.action_std_decay_freq        
         
         print(f"================ Start training ================")
@@ -460,7 +544,7 @@ class AMPAgent:
             # ------------- Logging training state -------------
             
             # Writting for tensorboard    
-            for k, v in step_metrics:
+            for k, v in step_metrics.items():
                 avg = np.mean(v)
                 self.writer.add_scalar(k, avg, self.timesteps)                  
         
@@ -487,10 +571,10 @@ class AMPAgent:
 
             # Save best model
             if avg_score >= best_score:
-                self.save(f'best', envs)
+                self.save(f'best')
                 best_score = avg_score
 
-            self.save(f"timesteps{self.timesteps}", envs)
+            self.save(f"timesteps{self.timesteps}")
             
         
     

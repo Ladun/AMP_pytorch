@@ -2,7 +2,10 @@
 import argparse
 import logging
 
-import envpool
+import gymnasium as gym
+from gymnasium.vector import AsyncVectorEnv
+
+import custom_env
 
 from algo.agent import AMPAgent
 from algo.utils.general import get_config
@@ -28,6 +31,12 @@ def parse_args():
 
     return args
 
+def make_env(env_name):
+    def _init():
+        env = gym.make(env_name, env_config={"render_mode":"rgb_array"})
+        return env
+    return _init
+
 def main():
     args = parse_args()
 
@@ -48,8 +57,8 @@ def main():
         trainer = AMPAgent(config)        
 
     if args.train:
-        
-        trainer.step(envs, args.exp_name)
+        envs = AsyncVectorEnv([make_env(config.env.env_name) for _ in range(config.env.num_envs)])
+        trainer.train(envs, args.exp_name)
 
     # if args.eval:
     #     env = create_mujoco_env(trainer.config.env.env_name, video_path=args.video_path)

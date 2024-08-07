@@ -19,7 +19,7 @@ class StadiumScene(Scene):
             
             self.ground_plane_mjcf = self._p.loadSDF(get_model_data("plane_stadium.sdf"))
 
-            print(f"ground plane: {self.ground_plane_mjcf}")
+            # print(f"ground plane: {self.ground_plane_mjcf}")/a
             for i in self.ground_plane_mjcf:
                 self._p.changeDynamics(i,-1,lateralFriction=0.8, restitution=0.5)
                 self._p.changeVisualShape(i,-1,rgbaColor=[1,1,1,0.8])
