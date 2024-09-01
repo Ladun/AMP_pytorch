@@ -43,3 +43,5 @@ def orthogonal_init(tensor, gain=1):
         tensor.view_as(q).copy_(q)
         tensor.mul_(gain)
     return tensor
+
+

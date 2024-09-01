@@ -22,7 +22,7 @@ def parse_args():
                         help="pretrained model prefix(ex/ number of episode, 'best' or 'last') from same experiments")
     parser.add_argument("--experiment_path", type=str, default=None,
                         help="path to pretrained model ")
-    parser.add_argument("--video_path", type=str, default='videos',
+    parser.add_argument("--video_path", type=str, default=None,
                         help="path to saving playing video ")
     parser.add_argument("--not_resume", action='store_true')
     parser.add_argument("--desc", type=str, default="",
@@ -60,13 +60,18 @@ def main():
         envs = AsyncVectorEnv([make_env(config.env.env_name) for _ in range(config.env.num_envs)])
         trainer.train(envs, args.exp_name)
 
-    # if args.eval:
-    #     env = create_mujoco_env(trainer.config.env.env_name, video_path=args.video_path)
-    #     trainer.play(
-    #         env=env,
-    #         num_episodes=args.eval_n_episode,
-    #         max_ep_len=2048
-    #     )
+    if args.eval:
+        if args.video_path:
+            env = gym.make(trainer.config.env.env_name, env_config={"render_mode": 'rgb_array'})
+            env = gym.wrappers.RecordVideo(env, args.video_path)
+        else:
+            env = gym.make(trainer.config.env.env_name, env_config={"render_mode": 'human'})
+            
+        trainer.eval(
+            env=env,
+            num_episodes=args.eval_n_episode,
+            max_ep_len=2048
+        )
         
 
 if __name__ == "__main__":

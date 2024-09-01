@@ -19,7 +19,33 @@ class WalkerBaseBulletEnv(BaseBulletEnv):
         # to distinguish ground and other objects
         self.foot_ground_object_names = set(["floor"])
         # discourage stuck joints
-        self.joints_at_limit_cost = -0.1
+        self.joints_at_limit_cost = -0.1       
+    
+
+    def set_robot_state(self, state):
+        more = state[:9]
+        j = state[9:-2]
+        feet_contact = state[-2:]
+
+        # 위치와 방향 설정
+        pos = more[0:3]
+        orn = self._p.getQuaternionFromEuler(more[6:9])
+        self.robot.robot_body.reset_position(pos)
+        self.robot.robot_body.reset_orientation(orn)
+
+        lin_vel = [more[3], more[4], more[5]]
+        ang_vel = [0, 0, 0] 
+        self.robot.robot_body.reset_velocity(lin_vel, ang_vel)
+
+        for i, joint in enumerate(self.robot.ordered_joints):
+            angle = j[i*2]
+            angular_speed = j[i*2+1]
+            joint.set_state(angle, angular_speed)
+
+        self.robot.feet_contact[0] = feet_contact[0]
+        self.robot.feet_contact[1] = feet_contact[1]
+
+        return self.robot.calc_state()
 
     def create_single_player_scene(self, bullet_client):
         self.stadium_scene = StadiumScene(bullet_client=bullet_client, gravity=9.8,

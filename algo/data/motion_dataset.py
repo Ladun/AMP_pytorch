@@ -43,7 +43,7 @@ class MotionDataset(Dataset):
                 skeleton_data[asf_file_name] = {"asf_data": asf_data, "joint_mapping": joint_mapping}
 
             # Load amc files
-            amc_files = glob.glob(os.path.join(data_dir, '**/*.amc'))
+            amc_files = glob.glob(os.path.join(data_dir, '**', '*.amc'), recursive=True)
             for amc_file in tqdm.tqdm(amc_files, desc="Load amc file"):
                 asf_file_name = os.path.split(amc_file)[1]
                 asf_file_name = os.path.splitext(asf_file_name)[0]

@@ -278,11 +278,14 @@ class AMPAgent:
 
 
     def optimize_discriminator(self, data):
+        
         expert_loader = DataLoader(self.motion_dataset, 
                                    batch_size=self.config.train.gail.batch_size,
                                    shuffle=True)  
-        expert_loader = iter(expert_loader) 
-        agent_loader  = data_iterator(self.config.train.gail.batch_size, data)    
+        expert_iter = iter(expert_loader) 
+        agent_iter  = data_iterator(self.config.train.gail.batch_size, data)    
+        
+        iter_len = max(len(data[0]), len(expert_loader)) // self.config.train.gail.batch_size
     
         loss_fn = nn.MSELoss()
         discriminator_losses = []
@@ -290,22 +293,33 @@ class AMPAgent:
         expert_accuracies = []
         
         self.disc.train()
-        for agent_data in agent_loader:
-            ob, next_ob = agent_data[:2]
-            ob, next_ob = ob.to(self.device), next_ob.to(self.device)
-            expert_ob, expert_next_ob = next(expert_loader)
-            expert_ob, expert_next_ob = expert_ob.to(self.device), expert_next_ob.to(self.device)
-            
+        for _ in range(iter_len):
+            try:
+                agent_data = next(agent_iter)
+            except StopIteration as e:
+                agent_iter = data_iterator(self.config.train.gail.batch_size, data)    
+                agent_data = next(agent_iter)
+            agent_data = torch.concat([d.to(self.device) for d in agent_data[:2]], dim=1)
+        
+            try:
+                expert_data = next(expert_iter)
+            except StopIteration as e:
+                expert_iter = iter(expert_loader)   
+                expert_data = next(expert_iter)
+            expert_data = torch.concat([d.to(self.device) for d in expert_data[:2]], dim=1)        
 
-            agent_prob = self.disc(ob, next_ob)
-            expert_prob = self.disc(expert_ob, expert_next_ob)
+            # Train
+            agent_prob = self.disc(agent_data)
+            expert_prob = self.disc(expert_data)
 
             agent_loss = loss_fn(agent_prob, -torch.ones_like(agent_prob))
             expert_loss = loss_fn(expert_prob, torch.ones_like(expert_prob))
+            
+            # calculate gradient penalty
+            gradient_penalty = self.disc.compute_gradient_penalty(expert_prob, agent_data)
         
             # maximize E_expert [ (D(s, s') - 1)^2] + E_agent [(D(s, s') + 1)^2]
-            # TODO: add gradient_penalty
-            loss = agent_loss + expert_loss
+            loss = agent_loss + expert_loss + self.config.train.gail.gradient_penalty_weight * gradient_penalty
             discriminator_losses.append(loss.item())
 
             self.disc_optimizer.zero_grad()
@@ -367,13 +381,15 @@ class AMPAgent:
         
         with self.timer_manager.get_timer("Backpropagation"):                
             for _ in range(self.config.train.gail.epochs):
-                disc_metric = self.optimize_discriminator(data)
+                with self.timer_manager.get_timer("Discrimniator optimize"):  
+                        disc_metric = self.optimize_discriminator(data)
                 
                 for k, v in disc_metric.items():
                     metrics[k].extend(v)
                     
             for _ in range(self.config.train.ppo.epochs):
-                policy_metric = self.optimize_policy(data)
+                with self.timer_manager.get_timer("Policy optimize"):  
+                    policy_metric = self.optimize_policy(data)
                 
                 for k, v in policy_metric.items():
                     metrics[k].extend(v)           
@@ -396,9 +412,10 @@ class AMPAgent:
         return metrics
     
     
-    def collect_trajectory(self, envs, state, episodic_reward, duration):
+    def collect_trajectory(self, envs, state, episodic_reward, style_reward, duration):
         
         episodic_rewards = []
+        style_rewards = []
         durations = []
         done = np.zeros(self.config.env.num_envs)
         
@@ -435,9 +452,11 @@ class AMPAgent:
             duration += 1
             
             with torch.no_grad():
-                style_reward = self.disc.get_reward(state, torch.from_numpy(next_state).to(self.device, dtype=torch.float))
-                style_reward = style_reward.squeeze(1).cpu().numpy()       
-            total_reward = w_g * reward + w_s * style_reward
+                s_reward = self.disc.get_reward(state, torch.from_numpy(next_state).to(self.device, dtype=torch.float))
+                s_reward = s_reward.squeeze(1).cpu().numpy()       
+            style_reward += s_reward
+            
+            total_reward = w_g * reward + w_s * s_reward
 
             if self.config.train.reward_scaler:
                 total_reward = self.reward_scaler(total_reward, terminated + truncated)
@@ -456,18 +475,19 @@ class AMPAgent:
             for idx, d in enumerate(done):
                 if d:
                     episodic_rewards.append(episodic_reward[idx])
+                    style_rewards.append(style_reward[idx])
                     durations.append(duration[idx])    
-                    # irl_score_queue.append(irl_episodic_reward[idx])
 
                     episodic_reward[idx] = 0
+                    style_reward[idx] = 0
                     duration[idx] = 0            
-                    # irl_episodic_reward[idx] = 0
             
             # update state
             state = next_state  
             
         return {
             "train/score": episodic_rewards,
+            "train/style_reward": style_reward,
             "train/duration": durations
         }, next_state, done
         
@@ -504,7 +524,7 @@ class AMPAgent:
 
         episodic_reward = np.zeros(self.config.env.num_envs)
         duration        = np.zeros(self.config.env.num_envs)
-        irl_episodic_reward = np.zeros(self.config.env.num_envs)
+        style_reward    = np.zeros(self.config.env.num_envs)
         best_score      = -1e9
         
         # ==== Make rollout buffer
@@ -534,7 +554,7 @@ class AMPAgent:
             
             with self.timer_manager.get_timer("Total"):
                 with self.timer_manager.get_timer("Collect Trajectory"):
-                    step_metrics, next_state, done = self.collect_trajectory(envs, next_state, episodic_reward, duration)
+                    step_metrics, next_state, done = self.collect_trajectory(envs, next_state, episodic_reward, style_reward, duration)
                         
                 with self.timer_manager.get_timer("Optimize"):  
                     optimize_metrics = self.optimize(next_state, done)  
@@ -566,7 +586,7 @@ class AMPAgent:
             
             logger.info(f"[{datetime.now().replace(microsecond=0) - start_time}] {self.timesteps}/{self.config.train.total_timesteps} - score: {avg_score} +-{std_score} \t duration: {avg_duration}")
             for k, v in self.timer_manager.timers.items():
-                logger.info(f"\t\t {k} time: {v.get()} sec")
+                logger.info(f"\t\t {k} time: {round(v.clear(), 5)} sec")
             logger.info(f"\t\t Estimated training time remaining: {remaining_training_time_min} min {remaining_training_time_sec} sec")
 
             # Save best model
@@ -575,8 +595,47 @@ class AMPAgent:
                 best_score = avg_score
 
             self.save(f"timesteps{self.timesteps}")
-            
         
     
-    def eval(self):
-        pass
+    def eval(self, env, max_ep_len, num_episodes=10):  
+
+        rewards = []
+        durations = []
+
+        for episode in range(num_episodes):
+
+            episodic_reward = 0
+            duration = 0
+            state, _ = env.reset()
+
+            for t in range(max_ep_len):
+
+                # ------------- Collect Trajectories -------------
+
+                with torch.no_grad():
+                    if self.config.train.observation_normalizer:
+                        state = self.obs_normalizer(state, update=False)
+                    action, _, _, _ = self.network(torch.from_numpy(state).unsqueeze(0).to(self.device, dtype=torch.float))
+                    
+                next_state, reward, terminated, truncated, info = env.step(np.clip(action.cpu().numpy().squeeze(0), 
+                                                                                    env.action_space.low, 
+                                                                                    env.action_space.high))
+
+                episodic_reward += reward
+                duration += 1
+
+                done = terminated + truncated
+                if done:
+                    break
+
+                # update state
+                state = next_state
+
+            rewards.append(episodic_reward)
+            durations.append(duration)
+            logger.info(f"Episode {episode}: score - {episodic_reward} duration - {t}")
+
+        avg_reward = np.mean(rewards)
+        avg_duration = np.mean(durations)
+        logger.info(f"Average score {avg_reward}, duration {avg_duration} on {num_episodes} games")               
+        env.close()

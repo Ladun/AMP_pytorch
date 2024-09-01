@@ -16,7 +16,7 @@ class Timer:
     def __init__(self):
         self.start = 0
         self.end = 0
-        self.duration = 0
+        self.durations = []
 
     def __enter__(self):
         self.start = time.time()
@@ -24,10 +24,15 @@ class Timer:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.end = time.time()
-        self.duration = self.end - self.start
+        self.durations.append(self.end - self.start)
+
+    def clear(self):
+        duration = sum(self.durations) / len(self.durations)
+        self.durations.clear()
+        return duration
 
     def get(self):
-        return round(self.duration, 5)
+        return round(self.durations[-1], 5)
 
 
 class TimerManager:

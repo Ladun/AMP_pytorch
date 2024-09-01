@@ -7,7 +7,7 @@ env:
     action_dim: 17
 checkpoint_path: "checkpoints/Humanoid"
 network:
-    action_std_init: 0.4
+    action_std_init: 0.3
     action_std_decay_rate: 0.01
     min_action_std: 0.1
     action_std_decay_freq: 3e5
@@ -34,10 +34,10 @@ train:
         asf_dir: "data/asf"
         hidden_dim: 100
         optimizer:
-            lr: 1e-4
-            weight_decay: 0.2            
+            lr: 1e-3        
         epochs: 10
         batch_size: 1024
+        gradient_penalty_weight: 20
     reward_scaler: True
     observation_normalizer: True
     clipping_gradient: True
