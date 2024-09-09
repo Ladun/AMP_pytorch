@@ -6,8 +6,7 @@ import logging
 import shutil
 import math
 from datetime import datetime
-from PIL import Image
-from collections import deque
+from collections import defaultdict
 
 from omegaconf import OmegaConf
 import gymnasium as gym
@@ -18,7 +17,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
-from .models.policy import ActorCritic
+from .models.policy import Actor, Critic
 from .models.discriminator import Discriminator
 from .data.motion_dataset import MotionDataset
 from .scheduler import WarmupLinearSchedule
@@ -57,14 +56,19 @@ class AMPAgent:
         
         # -------- Define models --------
         
-        self.network = ActorCritic(config, self.device).to(self.device) 
+        self.actor = Actor(config, self.device).to(self.device) 
+        self.critic = Critic(config, self.device).to(self.device) 
         self.disc = Discriminator(config).to(self.device) 
         
         # -------- Define train supporter ---------
                
-        self.optimizer = torch.optim.Adam(
-            self.network.parameters(),
-            **self.config.network.optimizer
+        self.actor_optimizer = torch.optim.Adam(
+            self.actor.parameters(),
+            **self.config.actor.optimizer
+        )  
+        self.critic_optimizer = torch.optim.Adam(
+            self.critic.parameters(),
+            **self.config.critic.optimizer
         )
         
         self.disc_optimizer  = torch.optim.Adam([
@@ -136,8 +140,10 @@ class AMPAgent:
         os.makedirs(ckpt_path, exist_ok=True)
         
         # save model and optimizers
-        torch.save(self.network.state_dict(), os.path.join(ckpt_path, "network.pt"))
-        torch.save(self.optimizer.state_dict(), os.path.join(ckpt_path, "optimizer.pt"))
+        torch.save(self.actor.state_dict(), os.path.join(ckpt_path, "actor.pt"))
+        torch.save(self.actor_optimizer.state_dict(), os.path.join(ckpt_path, "actor_optimizer.pt"))
+        torch.save(self.critic.state_dict(), os.path.join(ckpt_path, "critic.pt"))
+        torch.save(self.critic_optimizer.state_dict(), os.path.join(ckpt_path, "critic_optimizer.pt"))
         
         torch.save(self.disc.state_dict(), os.path.join(ckpt_path, "discriminator.pt"))
         torch.save(self.disc_optimizer.state_dict(), os.path.join(ckpt_path, "disc_optimizer.pt"))
@@ -162,15 +168,17 @@ class AMPAgent:
     def load(cls, experiment_path, postfix, resume=True):
 
         config = get_config(os.path.join(experiment_path, "config.yaml"))
-        config.network.action_std_init = config.network.min_action_std
+        config.actor.action_std_init = config.actor.min_action_std
         amp_algo = AMPAgent(config)
         
         # Create a variable to indicate which path the model will be read from
         ckpt_path = os.path.join(experiment_path, "checkpoints", postfix)
         print(f"Load pretrained model from {ckpt_path}")
 
-        amp_algo.network.load_state_dict(torch.load(os.path.join(ckpt_path, "network.pt")))
-        amp_algo.optimizer.load_state_dict(torch.load(os.path.join(ckpt_path, "optimizer.pt")))
+        amp_algo.actor.load_state_dict(torch.load(os.path.join(ckpt_path, "actor.pt")))
+        amp_algo.actor_optimizer.load_state_dict(torch.load(os.path.join(ckpt_path, "actor_optimizer.pt")))
+        amp_algo.critic.load_state_dict(torch.load(os.path.join(ckpt_path, "critic.pt")))
+        amp_algo.critic_optimizer.load_state_dict(torch.load(os.path.join(ckpt_path, "critic_optimizer.pt")))
         
         amp_algo.disc.load_state_dict(torch.load(os.path.join(ckpt_path, "discriminator.pt")))
         amp_algo.disc_optimizer.load_state_dict(torch.load(os.path.join(ckpt_path, "disc_optimizer.pt")))
@@ -203,7 +211,8 @@ class AMPAgent:
         value_losses    = []
         total_losses    = []
         
-        c2 = self.config.train.ppo.coef_entropy_penalty
+        self.actor.train()
+        self.critic.train()
         for batch in data_loader:
             ob, _, ac, old_logp, adv, vtarg, old_v = batch
             adv = (adv - adv.mean()) / (adv.std() + 1e-7)
@@ -211,7 +220,8 @@ class AMPAgent:
             # -------- Loss calculate --------
 
             # --- policy loss
-            _, cur_logp, cur_ent, cur_v = self.network(ob, action=ac)
+            _, cur_logp, cur_ent = self.actor(ob, action=ac)
+            cur_v = self.critic(ob)
             cur_v = cur_v.reshape(-1)
 
             ratio = torch.exp(cur_logp - old_logp)
@@ -236,33 +246,39 @@ class AMPAgent:
             # --- entropy loss
 
             policy_ent = -cur_ent.mean()
+            
+            # -------- Actor Backward process --------
+            actor_loss = policy_surr + self.config.train.ppo.coef_entropy_penalty * policy_ent            
+            self.actor_optimizer.zero_grad()
+            actor_loss.backward()
+            if self.config.train.clipping_gradient:
+                nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=0.5)
+            self.actor_optimizer.step()
+            
 
             # --- value loss
 
             if self.config.train.ppo.value_clipping:
                 cur_v_clipped = old_v + (cur_v - old_v).clamp(-self.config.train.ppo.eps_clip, self.config.train.ppo.eps_clip)
-                vloss1 = (cur_v - vtarg) ** 2 # F.smooth_l1_loss(cur_v, vtarg, reduction='none')
-                vloss2 = (cur_v_clipped - vtarg) ** 2 # F.smooth_l1_loss(cur_v_clipped, vtarg, reduction='none')
+                vloss1 = (cur_v - vtarg) ** 2
+                vloss2 = (cur_v_clipped - vtarg) ** 2
                 vf_loss = torch.max(vloss1, vloss2)
             else:
-                vf_loss = (cur_v - vtarg) ** 2 #F.smooth_l1_loss(cur_v, vtarg, reduction='none')
+                vf_loss = (cur_v - vtarg) ** 2 
                 
             vf_loss = 0.5 * vf_loss.mean()
 
-            # -------- Backward process --------
-
-            c1 = self.config.train.ppo.coef_value_function
-            c2 = self.config.train.ppo.coef_entropy_penalty
-
-            total_loss = policy_surr + c2 * policy_ent + c1 * vf_loss
-
-            self.optimizer.zero_grad()
-            total_loss.backward()
+            # -------- Critic Backward process --------
+            
+            critic_loss = self.config.train.ppo.coef_value_function * vf_loss
+            self.critic_optimizer.zero_grad()
+            critic_loss.backward()
             if self.config.train.clipping_gradient:
-                nn.utils.clip_grad_norm_(self.network.parameters(), max_norm=0.5)
-            self.optimizer.step()
+                nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=0.5)
+            self.critic_optimizer.step()
 
             # ---------- Record training loss data ----------
+            total_loss = actor_loss + critic_loss
     
             policy_losses.append(policy_surr.item())
             entropy_losses.append(policy_ent.item())
@@ -281,7 +297,8 @@ class AMPAgent:
         
         expert_loader = DataLoader(self.motion_dataset, 
                                    batch_size=self.config.train.gail.batch_size,
-                                   shuffle=True)  
+                                   shuffle=True,
+                                   drop_last=True)  
         expert_iter = iter(expert_loader) 
         agent_iter  = data_iterator(self.config.train.gail.batch_size, data)    
         
@@ -289,8 +306,9 @@ class AMPAgent:
     
         loss_fn = nn.MSELoss()
         discriminator_losses = []
-        learner_accuracies = []
+        agent_accuracies = []
         expert_accuracies = []
+        gradient_penalties = []
         
         self.disc.train()
         for _ in range(iter_len):
@@ -312,31 +330,36 @@ class AMPAgent:
             agent_prob = self.disc(agent_data)
             expert_prob = self.disc(expert_data)
 
-            agent_loss = loss_fn(agent_prob, -torch.ones_like(agent_prob))
-            expert_loss = loss_fn(expert_prob, torch.ones_like(expert_prob))
-            
-            # calculate gradient penalty
-            gradient_penalty = self.disc.compute_gradient_penalty(expert_prob, agent_data)
+            agent_loss = 0.5 * loss_fn(agent_prob, -torch.ones_like(agent_prob))
+            expert_loss = 0.5 * loss_fn(expert_prob, torch.ones_like(expert_prob))
         
-            # maximize E_expert [ (D(s, s') - 1)^2] + E_agent [(D(s, s') + 1)^2]
-            loss = agent_loss + expert_loss + self.config.train.gail.gradient_penalty_weight * gradient_penalty
-            discriminator_losses.append(loss.item())
+            # minimize E_expert [ (D(s, s') - 1)^2] + E_agent [(D(s, s') + 1)^2]
+            loss = 0.5 * (agent_loss + expert_loss)
+            
+            if self.config.train.gail.gradient_penalty_weight != 0:            
+                # calculate gradient penalty
+                gradient_penalty = self.disc.compute_gradient_penalty(expert_data)                
+                loss += self.config.train.gail.gradient_penalty_weight * 0.5 * gradient_penalty
+            
 
             self.disc_optimizer.zero_grad()
             loss.backward()
             self.disc_optimizer.step()
 
-            learner_acc = ((agent_prob >= 0.5).float().mean().item())
-            expert_acc = ((expert_prob < 0.5).float().mean().item())
+            agent_acc  = ((agent_prob < 0).float().mean().item())
+            expert_acc = ((expert_prob > 0).float().mean().item())
 
-            learner_accuracies.append(learner_acc)
+            discriminator_losses.append(loss.item())
+            agent_accuracies.append(agent_acc)
             expert_accuracies.append(expert_acc)
+            gradient_penalties.append(gradient_penalty.item())
         
         return {
             
             "train_gail/discrim_loss": discriminator_losses,
-            "train_gail/learner_accuracy": learner_accuracies,
-            "train_gail/expert_accuracy": expert_accuracies
+            "train_gail/agent_accuracy": agent_accuracies,
+            "train_gail/expert_accuracy": expert_accuracies,
+            "train_gail/gradient_penalty": gradient_penalties,
         }
     
     def prepare_data(self, next_state, done):
@@ -345,7 +368,7 @@ class AMPAgent:
         with torch.no_grad():
             if self.config.train.observation_normalizer:
                 next_state = self.obs_normalizer(next_state)
-            _, _, _, next_value = self.network(torch.Tensor(next_state).to(self.device))
+            next_value = self.critic(torch.Tensor(next_state).to(self.device))
             next_value = next_value.flatten()
         
         data = self.memory.compute_gae_and_get(next_state, next_value, done)
@@ -358,34 +381,27 @@ class AMPAgent:
         adv      = data['advant'].float()
         v        = data['value'].float()
                 
-        return s, ns, a, logp, v_target, adv, v
+        return s, ns, a, logp, adv, v_target, v
     
     def optimize(self, next_state, done):     
                     
-        # ------------- Preprocessing for optimizin-------------
+        # ------------- Preprocessing for optimizing-------------
+        
         with self.timer_manager.get_timer("Prepare data"):
             data = self.prepare_data(next_state, done)
             
         # ------------- Optimizing-------------
         
-        metrics = {
-            "train/policy_loss": [],
-            "train/entropy_loss": [],
-            "train/value_loss": [],
-            "train/total_loss": [],
-            
-            "train_gail/discrim_loss": [],
-            "train_gail/learner_accuracy": [],
-            "train_gail/expert_accuracy": []
-        }
+        metrics = defaultdict(list)
         
         with self.timer_manager.get_timer("Backpropagation"):                
-            for _ in range(self.config.train.gail.epochs):
-                with self.timer_manager.get_timer("Discrimniator optimize"):  
+            if self.config.train.gail.use:
+                for _ in range(self.config.train.gail.epochs):
+                    with self.timer_manager.get_timer("Discrimniator optimize"):  
                         disc_metric = self.optimize_discriminator(data)
-                
-                for k, v in disc_metric.items():
-                    metrics[k].extend(v)
+                    
+                    for k, v in disc_metric.items():
+                        metrics[k].extend(v)
                     
             for _ in range(self.config.train.ppo.epochs):
                 with self.timer_manager.get_timer("Policy optimize"):  
@@ -398,10 +414,10 @@ class AMPAgent:
         
         # action std decaying
         while self.timesteps > self.next_action_std_decay_step:
-            self.next_action_std_decay_step += self.config.network.action_std_decay_freq
-            self.network.action_decay(
-                self.config.network.action_std_decay_rate,
-                self.config.network.min_action_std
+            self.next_action_std_decay_step += self.config.actor.action_std_decay_freq
+            self.actor.action_decay(
+                self.config.actor.action_std_decay_rate,
+                self.config.actor.min_action_std
             )
             
         # scheduling learning rate
@@ -412,16 +428,15 @@ class AMPAgent:
         return metrics
     
     
-    def collect_trajectory(self, envs, state, episodic_reward, style_reward, duration):
+    def collect_trajectory(self, envs, state, done, episodic_reward, style_reward, duration):
         
         episodic_rewards = []
         style_rewards = []
         durations = []
-        done = np.zeros(self.config.env.num_envs)
         
         w_g = self.config.train.coef_task_specific
         w_s = self.config.train.coef_task_agnostic      
-        for t in range(0, self.config.train.max_episode_len):                        
+        for _ in range(0, self.config.train.max_episode_len):                        
             # ------------- Collect Trajectories -------------
             '''
             Actor-Critic symbol's information
@@ -440,7 +455,8 @@ class AMPAgent:
                 if self.config.train.observation_normalizer:
                     state = self.obs_normalizer(state)
                 state = torch.from_numpy(state).to(self.device, dtype=torch.float)
-                action, logprobs, _, values = self.network(state)
+                action, logprobs, _ = self.actor(state)
+                values = self.critic(state)
                 values = values.flatten() # reshape shape of the value to (num_envs,)
                 
             next_state, reward, terminated, truncated, _ = envs.step(np.clip(action.cpu().numpy(), envs.action_space.low, envs.action_space.high))
@@ -451,12 +467,15 @@ class AMPAgent:
             episodic_reward += reward
             duration += 1
             
-            with torch.no_grad():
-                s_reward = self.disc.get_reward(state, torch.from_numpy(next_state).to(self.device, dtype=torch.float))
-                s_reward = s_reward.squeeze(1).cpu().numpy()       
-            style_reward += s_reward
-            
-            total_reward = w_g * reward + w_s * s_reward
+            if self.config.train.gail.use:
+                with torch.no_grad():
+                    s_reward = self.disc.get_reward(state, torch.from_numpy(next_state).to(self.device, dtype=torch.float))
+                    s_reward = s_reward.squeeze(1).cpu().numpy()       
+                style_reward += s_reward
+                
+                total_reward = w_g * reward + w_s * s_reward
+            else:
+                total_reward = reward
 
             if self.config.train.reward_scaler:
                 total_reward = self.reward_scaler(total_reward, terminated + truncated)
@@ -545,8 +564,9 @@ class AMPAgent:
         done         (num_envs,)                 numpy.ndarray
         ===========  ==========================  ==================
         '''
-        next_state, _  = envs.reset()
-        self.next_action_std_decay_step = self.config.network.action_std_decay_freq        
+        next_state, _  = envs.reset(seed=self.config.seed)
+        done = np.zeros(self.config.env.num_envs)
+        self.next_action_std_decay_step = self.config.actor.action_std_decay_freq        
         
         print(f"================ Start training ================")
         print(f"========= Exp name: {self.config.experiment_name} ==========")
@@ -554,7 +574,7 @@ class AMPAgent:
             
             with self.timer_manager.get_timer("Total"):
                 with self.timer_manager.get_timer("Collect Trajectory"):
-                    step_metrics, next_state, done = self.collect_trajectory(envs, next_state, episodic_reward, style_reward, duration)
+                    step_metrics, next_state, done = self.collect_trajectory(envs, next_state, done, episodic_reward, style_reward, duration)
                         
                 with self.timer_manager.get_timer("Optimize"):  
                     optimize_metrics = self.optimize(next_state, done)  
@@ -586,8 +606,8 @@ class AMPAgent:
             
             logger.info(f"[{datetime.now().replace(microsecond=0) - start_time}] {self.timesteps}/{self.config.train.total_timesteps} - score: {avg_score} +-{std_score} \t duration: {avg_duration}")
             for k, v in self.timer_manager.timers.items():
-                logger.info(f"\t\t {k} time: {round(v.clear(), 5)} sec")
-            logger.info(f"\t\t Estimated training time remaining: {remaining_training_time_min} min {remaining_training_time_sec} sec")
+                logger.info(f"\t {k} time: {round(v.clear(), 5)} sec")
+            logger.info(f"\t Estimated training time remaining: {remaining_training_time_min} min {remaining_training_time_sec} sec")
 
             # Save best model
             if avg_score >= best_score:
@@ -615,7 +635,7 @@ class AMPAgent:
                 with torch.no_grad():
                     if self.config.train.observation_normalizer:
                         state = self.obs_normalizer(state, update=False)
-                    action, _, _, _ = self.network(torch.from_numpy(state).unsqueeze(0).to(self.device, dtype=torch.float))
+                    action, _, _ = self.actor(torch.from_numpy(state).unsqueeze(0).to(self.device, dtype=torch.float))
                     
                 next_state, reward, terminated, truncated, info = env.step(np.clip(action.cpu().numpy().squeeze(0), 
                                                                                     env.action_space.low, 

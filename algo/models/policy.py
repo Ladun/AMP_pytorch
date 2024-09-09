@@ -5,7 +5,29 @@ from torch.distributions import MultivariateNormal
 
 from .functions import *
 
-class ActorCritic(nn.Module):
+class Critic(nn.Moudle):
+    def __init__(self, config, device):
+        super().__init__()
+
+        # -------- Initialize variables --------
+
+        self.device     = device
+    
+        activation_func = nn.ReLU
+        self.m = nn.Sequential(
+            nn.Linear(config.env.state_dim, 256),
+            activation_func(),
+            nn.Linear(256, 256),
+            activation_func(),
+            nn.Linear(256, 1)
+        )       
+
+        self.apply(init_orthogonal_weights)
+        
+    def forward(self, state):
+        return self.critic(state)
+
+class Actor(nn.Module):
     def __init__(self, config, device):
         super().__init__()
 
@@ -21,35 +43,14 @@ class ActorCritic(nn.Module):
         # learnable std
         # self.actor_logstd = nn.Parameter(torch.log(torch.ones(1, config.env.action_dim) * config.network.action_std_init))
 
-        if self.shared_layer:
-            self.shared_net = nn.Sequential(
-                nn.Linear(config.env.state_dim, 64),
-                nn.Tanh(),
-                nn.Linear(64, 64),
-                nn.Tanh()
-            )
-            self.actor = nn.Sequential(
-                nn.Linear(64, config.env.action_dim),
-                nn.Tanh()
-            )
-            self.critic = nn.Linear(64, 1)
-
-        else:
-            self.actor = nn.Sequential(
-                nn.Linear(config.env.state_dim, 64),
-                nn.Tanh(),
-                nn.Linear(64, 64),
-                nn.Tanh(),
-                nn.Linear(64, config.env.action_dim),
-                nn.Tanh()
-            )
-            self.critic = nn.Sequential(
-                nn.Linear(config.env.state_dim, 64),
-                nn.Tanh(),
-                nn.Linear(64, 64),
-                nn.Tanh(),
-                nn.Linear(64, 1)
-            )          
+        activation_func = nn.ReLU
+        self.m = nn.Sequential(
+            nn.Linear(config.env.state_dim, 256),
+            activation_func(),
+            nn.Linear(256, 256),
+            activation_func(),
+            nn.Linear(256, config.env.action_dim)
+        )   
         
         self.apply(init_orthogonal_weights)
 
@@ -68,11 +69,9 @@ class ActorCritic(nn.Module):
         self.action_var = torch.full((self.action_dim, ), self.action_std ** 2).to(self.device)
 
     def forward(self, state, action=None):
-        if self.shared_layer:
-            state = self.shared_net(state)
 
         # continuous space action 
-        action_mean = self.actor(state)
+        action_mean = self.m(state)
 
         action_var = self.action_var.expand_as(action_mean)
         cov_mat = torch.diag_embed(action_var).to(self.device)

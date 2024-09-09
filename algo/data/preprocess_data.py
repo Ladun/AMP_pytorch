@@ -229,8 +229,11 @@ def convert_amc_to_walker_state(motion_data, joint_mapping, humanoid_joints, wal
     
     for i, frame in enumerate(motion_data):
         if 'root' in frame:
-            root_pos = np.array([frame['root'].get(axis, 0) for axis in ['TX', 'TY', 'TZ']])
-            root_rot = R.from_euler('xyz', [frame['root'].get(axis, 0) for axis in ['RX', 'RY', 'RZ']], degrees=True)
+            root_pos = np.array([frame['root'].get(axis, 0) for axis in ['TZ', 'TX', 'TY']])
+            # scaling position
+            root_pos = root_pos / 16 
+            
+            root_rot = R.from_euler('xyz', [frame['root'].get(axis, 0) for axis in ['RZ', 'RX', 'RY']], degrees=True)
         else:
             root_pos = np.zeros(3)
             root_rot = R.identity()
@@ -239,13 +242,11 @@ def convert_amc_to_walker_state(motion_data, joint_mapping, humanoid_joints, wal
         if initial_z is None:
             initial_z = z
         
-        root_quat = root_rot.as_quat()
-        
         walk_target_theta = np.arctan2(walk_target_y - root_pos[1], walk_target_x - root_pos[0])
-        angle_to_target = walk_target_theta - root_rot.as_euler('xyz')[2]
-        
+        angle_to_target = walk_target_theta - root_rot.as_euler('xyz')[2]        
+                
         if i > 0:
-            prev_pos = np.array([motion_data[i-1]['root'].get(axis, 0) for axis in ['tx', 'ty', 'tz']])
+            prev_pos = np.array([motion_data[i-1]['root'].get(axis, 0) for axis in ['TZ', 'TX', 'TY']])
             velocity = (root_pos - prev_pos)
         else:
             velocity = np.zeros(3)
@@ -266,28 +267,35 @@ def convert_amc_to_walker_state(motion_data, joint_mapping, humanoid_joints, wal
         j = []
         joint_angles = {}
         for h_joint in humanoid_joint_order:
-            asf_joint = joint_mapping.get(h_joint)
+            asf_joint = joint_mapping.get(h_joint)    
+            
             if asf_joint and asf_joint in frame:
                 data = frame[asf_joint]
                 h_axis = humanoid_joints[h_joint]['axis']
+                
+                if "elbow" in h_joint:
+                    h_axis = [0, 1, 0]
+                    
                 if h_axis:
-                    rotation = R.from_euler('xyz', [data.get('rx', 0), data.get('ry', 0), data.get('rz', 0)], degrees=True)
+                    rotation = R.from_euler('xyz', [data.get('rz', 0), data.get('rx', 0), data.get('ry', 0)], degrees=True)
                     rot_vector = rotation.as_rotvec()
-                    angle = np.linalg.norm(rot_vector)
-                    axis = rot_vector / angle if angle != 0 else np.array([0, 0, 1])
-                    angle_rad = angle * np.dot(axis, h_axis) 
+                    rad = np.dot(rot_vector, h_axis)                    
+                    rad = np.clip(rad, humanoid_joints[h_joint]['joint_limit'][0],  humanoid_joints[h_joint]['joint_limit'][1])
+                    
                     
                     # 각속도 계산
                     if i > 0:
                         prev_data = motion_data[i-1][asf_joint]
-                        prev_rotation = R.from_euler('xyz', [prev_data.get('rx', 0), prev_data.get('ry', 0), prev_data.get('rz', 0)], degrees=True)
+                        prev_rotation = R.from_euler('xyz', [prev_data.get('rz', 0), prev_data.get('rx', 0), prev_data.get('ry', 0)], degrees=True)
                         angular_speed = (rotation * prev_rotation.inv()).as_rotvec()
                         angular_speed_proj = np.dot(angular_speed, h_axis)
                     else:
                         angular_speed_proj = 0
                     
-                    # 각도와 각속도를 -1에서 1 사이로 정규화 (가정: 관절 한계가 -pi에서 pi라고 가정)
-                    j.extend([angle_rad, 0])  # 2pi는 예시 최대 각속도
+                    if "shoulder" in h_joint:
+                        rad = -rad   
+                    
+                    j.extend([rad, angular_speed_proj])
                 else:
                     j.extend([0, 0])
             else:
@@ -300,13 +308,13 @@ def convert_amc_to_walker_state(motion_data, joint_mapping, humanoid_joints, wal
         ]
         
         state = np.concatenate([more, j, feet_contact])  
-        # state = np.clip(state, -5, 5)         
+        state = np.clip(state, -5, 5)         
         converted_frames.append(state)
         
     return np.array(converted_frames)
 
 
-def convert_amc_to_walker_setting(motion_data, joint_mapping, humanoid_joints, use_joint=None):
+def convert_amc_to_walker_debug(motion_data, joint_mapping, humanoid_joints, use_joint=None):
     converted_frames = []
     humanoid_joint_order = get_humanoid_joint_order()
     
@@ -417,7 +425,8 @@ if __name__ == "__main__":
         print(f"{key:<20}{val:<15}{skeleton_data['bone_data'][val]['axis']:<20}")
     
     walk_target_x, walk_target_y = 1e3, 0  # 예시 목표 위치
-    walker_states = convert_amc_to_walker_setting(motion_data[0:test_frame], joint_mapping, humanoid_joints)
+    walker_states = convert_amc_to_walker_debug(motion_data[0:test_frame], joint_mapping, humanoid_joints)
+    walker_states_2 = convert_amc_to_walker_state(motion_data[0:test_frame], joint_mapping, humanoid_joints, 0, 0, 0)
     
     print(f"Total frames: {len(motion_data)}")
     for i, frame in enumerate(motion_data[:test_frame]):
@@ -431,6 +440,8 @@ if __name__ == "__main__":
             if asf_joint and asf_joint in frame:
                 rad = walker_states[i, 9 + j * 2]
                 ang = np.degrees(rad)
-                print(f"{h_joint}[{humanoid_joints[h_joint]['axis']}] -- {asf_joint}: {frame[asf_joint]} {rad} {ang}")
+                print(f"{h_joint}[{humanoid_joints[h_joint]['axis']}] -- {asf_joint}: {frame[asf_joint]}")
+                print(f"\tdebug |{rad} {ang}")
+                print(f"\tnormal|{rad} {ang}")
             else:
                 print(asf_joint, frame.keys())

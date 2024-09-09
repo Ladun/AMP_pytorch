@@ -24,7 +24,7 @@ if __name__ == "__main__":
     asf_joints = list(skeleton_data['bone_data'].keys())
     joint_mapping = create_joint_mapping(asf_joints, humanoid_joints)
         
-    walker_states = convert_amc_to_walker_setting(motion_data, 
+    walker_states = convert_amc_to_walker_debug(motion_data, 
                                                   joint_mapping, 
                                                   humanoid_joints,
                                                   use_joint=[

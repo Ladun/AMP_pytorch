@@ -9,13 +9,13 @@ class Discriminator(nn.Module):
         super().__init__()
 
         hidden_dim = config.train.gail.hidden_dim
+        activation_func = nn.ReLU
         self.m = nn.Sequential(
             nn.Linear(config.env.state_dim * 2, hidden_dim),
-            nn.Tanh(),
+            activation_func(),
             nn.Linear(hidden_dim, hidden_dim),
-            nn.Tanh(),
+            activation_func(),
             nn.Linear(hidden_dim, 1),
-            nn.Sigmoid()
         )
 
 
@@ -32,28 +32,20 @@ class Discriminator(nn.Module):
         
         return reward
     
-    def compute_gradient_penalty(self, real_samples, fake_samples):
-        # Generate random points between real and fake samples
-        alpha = torch.rand(real_samples.size(0), 1, device=real_samples.device)
-        interpolates = (alpha * real_samples + ((1 - alpha) * fake_samples)).requires_grad_(True)
+    def compute_gradient_penalty(self, samples):
         
         # Compute discriminator output at these intermediate points
-        d_interpolates = self.forward(interpolates)
-        
-        # Fake output tensor
-        fake = torch.ones(real_samples.size(0), 1, device=real_samples.device, requires_grad=False)
+        outputs = self.forward(samples)
         
         # Compute gradients at the intermediate points
         gradients = torch.autograd.grad(
-            outputs=d_interpolates,
-            inputs=interpolates,
-            grad_outputs=fake,
+            outputs=outputs,
+            inputs=samples,
             create_graph=True,
             retain_graph=True,
-            only_inputs=True,
         )[0]
         
         # Calculate L2 norm of the gradients
         gradients = gradients.view(gradients.size(0), -1)
-        gradient_penalty = ((gradients.norm(2, dim=1) - 1) ** 2).mean()
+        gradient_penalty = (gradients.norm(2, dim=1)** 2).mean()
         return gradient_penalty

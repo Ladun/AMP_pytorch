@@ -13,16 +13,22 @@ import torch
 
 
 class Timer:
-    def __init__(self):
+    def __init__(self, parent=None):
         self.start = 0
         self.end = 0
         self.durations = []
+        self.parent = parent
 
     def __enter__(self):
         self.start = time.time()
+        if self.parent is not None:
+            self.parent.indent_level += 1
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        
+        if self.parent is not None:
+            self.parent.indent_level -= 1
         self.end = time.time()
         self.durations.append(self.end - self.start)
 
@@ -38,12 +44,17 @@ class Timer:
 class TimerManager:
     def __init__(self):
         self.timers = {}
+        self.indent_level = 0
 
     def get_timer(self, name):
+        if self.indent_level < 0:
+            self.indent_level = 0
+        
+        name = '\t' * self.indent_level + name
         if name in self.timers:
             return self.timers[name]
         else:
-            self.timers[name] = Timer()
+            self.timers[name] = Timer(self)
             return self.timers[name]
 
 

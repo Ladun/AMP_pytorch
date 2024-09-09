@@ -7,12 +7,13 @@ import glob
 import os
 
 import torch
+from torch import nn
 
 import gymnasium as gym
 from gymnasium.vector import AsyncVectorEnv
 
 import custom_env
-from algo.utils.general import TimerManager
+from algo.utils.general import TimerManager, set_seed
 from algo.data.preprocess_data import (
     parse_amc, parse_asf, create_joint_mapping, parse_humanoid_xml,
     convert_amc_to_walker_state
@@ -120,13 +121,49 @@ def data_preprocessing_test():
             f.write(f"{i} {text}\n")
     
     print(walker_states.shape)
+    
+def env_random_state_test():  
+    def make_env(env_name):
+        def _init():
+            env = gym.make(env_name, env_config={"render_mode":"rgb_array"})
+            return env
+        return _init
+
+    num_envs = 2
+    for i in range(4):
+        envs = AsyncVectorEnv([make_env("HumanoidBulletEnv-v0") for _ in range(num_envs)])
+        
+        envs.reset(seed=0)
+        
+        total_reward = np.zeros((num_envs,))
+        for _ in range(5):
+            s, r, term, trun, info = envs.step(np.zeros(envs.action_space.shape))
+            total_reward += r
+        print(total_reward)
+        
+def loss_test():
+    
+    loss_fn = nn.MSELoss(reduce=None, reduction='sum')
+    set_seed(0)
+    a = torch.randn(3, 5)
+    b = torch.randn(3, 5)
+    
+    loss = loss_fn(a, b)
+    
+    print(loss.shape, loss, loss / 15)
+    print( torch.square(a - b).sum())
 
 
 # images = get_inference_video(240, 1)
 # print(len(images))
 
-env_test()
+# env_test()
 
 # motion_dataset = MotionDataset("data", "data/asf")
 
 # data_preprocessing_test()
+
+# env_random_state_test()
+
+loss_test()
+print(1e-4)

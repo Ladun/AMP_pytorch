@@ -232,7 +232,6 @@ class XmlBasedRobot():
                 if joint_name[:8] != "jointfix":
                     joints[joint_name] = Joint(self._p, joint_name, bodies, i, j)
                     ordered_joints.append(joints[joint_name])
-                    print(joint_name)
 
                     joints[joint_name].power_coef = 100.0
 
