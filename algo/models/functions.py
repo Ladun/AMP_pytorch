@@ -8,10 +8,10 @@ def init_normal_weights(m):
         nn.init.normal_(m.weight, mean=0., std=0.1)
         nn.init.constant_(m.bias, 0.1)
 
-def init_orthogonal_weights(m):
+def init_orthogonal_weights(m, gain=1):
     if isinstance(m, nn.Linear):
         orthogonal_init(m.weight)
-        nn.init.constant_(m.bias, 0.1)
+        nn.init.constant_(m.bias, gain)
 
 def orthogonal_init(tensor, gain=1):
     '''

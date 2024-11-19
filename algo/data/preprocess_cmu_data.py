@@ -3,6 +3,9 @@ import re
 import xml.etree.ElementTree as ET
 from scipy.spatial.transform import Rotation as R
 
+
+# This code no longer used
+
 def parse_humanoid_xml(file_path):
     tree = ET.parse(file_path)
     root = tree.getroot()

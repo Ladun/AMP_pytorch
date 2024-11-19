@@ -1,10 +1,10 @@
-device: "cuda"
+device: "cpu"
 seed: 77
 env:
-    env_name: "HumanoidBulletEnv-v0"
-    num_envs: 30
-    state_dim: 44
-    action_dim: 17
+    env_name: null
+    num_envs: 10
+    state_dim: 225
+    action_dim: 28
 checkpoint_path: "checkpoints/Humanoid"
 actor:
     action_std_init: 0.4
@@ -24,7 +24,7 @@ critic:
         weight_decay: 0
 train: 
     total_timesteps: 20000000
-    max_episode_len: 1024
+    max_episode_len: 100
     gamma: 0.95
     tau: 0.95
     task_reward_lerp: 0.5
@@ -39,8 +39,8 @@ train:
         value_clipping: True
     gail:
         use: True
-        data_dir: ["data/run", "data/jump"]
-        asf_dir: "data/asf"
+        motion_files: ["data/deepmimic/humanoid3d_run.txt", "data/deepmimic/humanoid3d_walk.txt"]
+        skeleton_file: "data/deepmimic/humanoid3d.txt"
         hidden_dim: [1024, 512]
         init_scaling: 1
         optimizer:

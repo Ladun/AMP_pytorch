@@ -5,6 +5,8 @@ from numpngw import write_apng
 from collections import deque
 import glob
 import os
+import json
+import omegaconf 
 
 import torch
 from torch import nn
@@ -12,9 +14,8 @@ from torch import nn
 import gymnasium as gym
 from gymnasium.vector import AsyncVectorEnv
 
-import custom_env
 from algo.utils.general import TimerManager, set_seed
-from algo.data.preprocess_data import (
+from algo.data.preprocess_cmu_data import (
     parse_amc, parse_asf, create_joint_mapping, parse_humanoid_xml,
     convert_amc_to_walker_state
 )
@@ -153,7 +154,97 @@ def loss_test():
     print(loss.shape, loss, loss / 15)
     print( torch.square(a - b).sum())
 
+def unity_env_test():
+    import time
+    from envs.unity_env import VertorizedUnityEnv
+    from algo.replay_buffer import UnityReplayBuffer
+    
+    env = VertorizedUnityEnv(None)    
+    memory = UnityReplayBuffer(env.num_agents, 0.99, 0.95, torch.device('cpu'))
+    
+    state, _ = env.reset()
+    
+    action_space = env.action_space
+    obs_space = env.observation_space
+    
+    print(f"Action: {action_space}")
+    print(f"Obs: {obs_space}")
+    print(f"Num of agent: {env.num_agents}")
+    time_q = deque(maxlen=100)
+    t = time.time()
+    for i in range(5000):
+        
+        action = np.stack([env.action_space.sample() for _ in range(len(state))])        
+        next_state, reward, terminated, truncated, info = env.step(action)
 
+        if len(info['terminal_steps']) > 0:
+            agent_id =info['terminal_steps'].agent_id
+            ns, r, te, tr = info['terminal_state']
+            
+            memory.store(agent_id=info['terminal_steps'].agent_id,
+                         state=state[agent_id],
+                         action=action[agent_id],
+                         reward=r,
+                         value=np.ones_like(r),
+                         logprob=np.ones_like(r),
+                         done=te + tr)
+        
+        while len(info['decision_steps']) == 0:                
+            empty_ac = np.empty((0, *env.action_space.shape))   
+            next_state, reward, terminated, truncated, info = env.step(empty_ac)
+
+            if len(info['terminal_steps']) > 0:
+                agent_id =info['terminal_steps'].agent_id
+                ns, r, te, tr = info['terminal_state']
+                
+                memory.store(agent_id=info['terminal_steps'].agent_id,
+                             state=state[agent_id],
+                             action=action[agent_id],
+                             reward=r,
+                             value=np.ones_like(r),
+                             logprob=np.ones_like(r),
+                             done=te + tr)
+                
+        memory.store(agent_id=info['decision_steps'].agent_id,
+                     state=state,
+                     action=action,
+                     reward=reward,
+                     value=np.ones_like(reward),
+                     logprob=np.ones_like(reward),
+                     done=np.zeros_like(reward))
+        
+        time_q.append(np.round(time.time() - t, 5))
+        print(f"Step {i} {np.average(time_q)}")
+        t = time.time()
+        done = terminated + truncated
+        
+    print(next_state.shape)
+    print(reward.shape)
+    print(done.shape)
+        
+    for k,v in memory.temp_memory[0].items():
+        print(f"{k}: {v[0] if v is not None else None}")
+    traj = memory.compute_gae_and_get(next_state, torch.tensor(np.ones_like(done)), done)
+    
+    print(traj.keys())
+    print(traj['state'].shape)
+    
+def motion_dataset_test():
+    from torch.utils.data import DataLoader
+    
+    dataset = MotionDataset(["data/deepmimic/humanoid3d_run.txt", 
+                             "data/deepmimic/humanoid3d_walk.txt", 
+                             "data/deepmimic/humanoid3d_backflip.txt"], 
+                            "data/deepmimic/humanoid3d.txt")
+    
+    print(len(dataset))    
+    loader = DataLoader(dataset, 
+                        batch_size=30,
+                        shuffle=True,
+                        drop_last=True)  
+    loader_iter = iter(loader)
+    s, ns = next(loader_iter)
+    
 # images = get_inference_video(240, 1)
 # print(len(images))
 
@@ -165,5 +256,10 @@ def loss_test():
 
 # env_random_state_test()
 
-loss_test()
-print(1e-4)
+# loss_test()
+
+
+# unity_env_test()
+
+
+motion_dataset_test()

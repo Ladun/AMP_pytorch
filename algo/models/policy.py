@@ -5,27 +5,28 @@ from torch.distributions import MultivariateNormal
 
 from .functions import *
 
-class Critic(nn.Moudle):
+class Critic(nn.Module):
     def __init__(self, config, device):
         super().__init__()
 
         # -------- Initialize variables --------
 
-        self.device     = device
-    
-        activation_func = nn.ReLU
-        self.m = nn.Sequential(
-            nn.Linear(config.env.state_dim, 256),
-            activation_func(),
-            nn.Linear(256, 256),
-            activation_func(),
-            nn.Linear(256, 1)
-        )       
+        self.device     = device    
+        
+        activation_func = nn.ReLU        
+        in_dim = config.env.state_dim
+        self.m = []
+        for hidden in config.actor.hidden_dim:
+            self.m.append(nn.Linear(in_dim, hidden))
+            self.m.append(activation_func())
+            in_dim = hidden
+        self.m.append(nn.Linear(in_dim, 1))        
+        self.m = nn.Sequential(*self.m)       
 
-        self.apply(init_orthogonal_weights)
+        self.apply(lambda m: init_orthogonal_weights(m, config.critic.init_scaling))
         
     def forward(self, state):
-        return self.critic(state)
+        return self.m(state)
 
 class Actor(nn.Module):
     def __init__(self, config, device):
@@ -34,25 +35,25 @@ class Actor(nn.Module):
         # -------- Initialize variables --------
 
         self.device     = device
-        self.shared_layer = config.network.shared_layer
 
         # if action space is defined as continuous, make variance
         self.action_dim = config.env.action_dim
-        self.action_std = config.network.action_std_init
-        self.action_var = torch.full((self.action_dim, ), config.network.action_std_init ** 2).to(self.device)
+        self.action_std = config.actor.action_std_init
+        self.action_var = torch.full((self.action_dim, ), config.actor.action_std_init ** 2).to(self.device)
         # learnable std
         # self.actor_logstd = nn.Parameter(torch.log(torch.ones(1, config.env.action_dim) * config.network.action_std_init))
 
         activation_func = nn.ReLU
-        self.m = nn.Sequential(
-            nn.Linear(config.env.state_dim, 256),
-            activation_func(),
-            nn.Linear(256, 256),
-            activation_func(),
-            nn.Linear(256, config.env.action_dim)
-        )   
+        in_dim = config.env.state_dim
+        self.m = []
+        for hidden in config.actor.hidden_dim:
+            self.m.append(nn.Linear(in_dim, hidden))
+            self.m.append(activation_func())
+            in_dim = hidden
+        self.m.append(nn.Linear(in_dim, self.action_dim))        
+        self.m = nn.Sequential(*self.m)    
         
-        self.apply(init_orthogonal_weights)
+        self.apply(lambda m: init_orthogonal_weights(m, config.actor.init_scaling))
 
 
     def action_decay(self, action_std_decay_rate, min_action_std):
@@ -87,4 +88,4 @@ class Actor(nn.Module):
         if action is None:
             action = dist.sample()
 
-        return action, dist.log_prob(action), dist.entropy(), self.critic(state)
+        return action, dist.log_prob(action), dist.entropy()

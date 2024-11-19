@@ -4,7 +4,7 @@ from getkey import getkey
 import time
 
 from custom_env.env.humanoid_env import HumanoidEnv
-from algo.data.preprocess_data import *
+from algo.data.preprocess_cmu_data import *
 
     
 @dataclass

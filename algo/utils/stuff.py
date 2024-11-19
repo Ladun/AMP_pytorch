@@ -73,13 +73,13 @@ class RewardScaler:
         self.gamma = gamma
         self.ret = np.zeros(num_envs)
 
-    def __call__(self, reward, dones, update=True):
-        self.ret = self.ret * self.gamma + reward
+    def __call__(self, agent_id, reward, dones, update=True):
+        self.ret[agent_id] = self.ret[agent_id] * self.gamma + reward
         if update:
-            self.rms.update(self.ret)
+            self.rms.update(self.ret[agent_id])
         reward = reward / np.sqrt(self.rms.var + 1e-8)
 
-        self.ret[dones] = 0
+        self.ret[agent_id][dones] = 0
         return np.clip(reward, -10, 10)
 
     def save(self, base_path):

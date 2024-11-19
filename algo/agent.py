@@ -21,13 +21,14 @@ from .models.policy import Actor, Critic
 from .models.discriminator import Discriminator
 from .data.motion_dataset import MotionDataset
 from .scheduler import WarmupLinearSchedule
-from .replay_buffer import ReplayBuffer
+from .replay_buffer import ReplayBuffer, UnityReplayBuffer
 from .utils.general import (
     set_seed, pretty_config, get_cur_time_code,
     get_config, get_rng_state, set_rng_state,
     TimerManager, get_device
 )
 from .utils.stuff import RewardScaler, ObservationNormalizer
+from .data.preprocess_deepmimic_data import parse_skeleton_file
 
 logger = logging.getLogger(__name__)
 
@@ -35,14 +36,13 @@ logger = logging.getLogger(__name__)
 def data_iterator(batch_size, given_data):
     # Simple mini-batch spliter
 
-    ob, n_ob, ac, oldpas, adv, tdlamret, old_v = given_data
-    total_size = len(ob)
+    total_size = len(given_data[0])
     indices = np.arange(total_size)
     np.random.shuffle(indices)
     n_batches = total_size // batch_size
     for nb in range(n_batches):
         ind = indices[batch_size * nb : batch_size * (nb + 1)]
-        yield ob[ind], n_ob[ind], ac[ind], oldpas[ind], adv[ind], tdlamret[ind], old_v[ind]      
+        yield (d[ind] for d in given_data) 
 
 
 class AMPAgent:
@@ -70,19 +70,26 @@ class AMPAgent:
             self.critic.parameters(),
             **self.config.critic.optimizer
         )
-        
-        self.disc_optimizer  = torch.optim.Adam([
-            {'params': self.disc.parameters(),
-            **config.train.gail.optimizer}
-        ])
+                     
+        if self.config.train.gail.use:
+            self.disc_optimizer  = torch.optim.Adam([
+                {'params': self.disc.parameters(),
+                **config.train.gail.optimizer}
+            ])
         
         if self.config.train.scheduler:
-            self.scheduler = WarmupLinearSchedule(optimizer=self.optimizer,
-                                                  warmup_steps=0,
-                                                  max_steps=self.config.train.total_timesteps // (self.config.train.max_episode_len * self.config.env.num_envs))
-            self.disc_scheduler = WarmupLinearSchedule(optimizer=self.disc_optimizer,
-                                                       warmup_steps=0, 
-                                                       max_steps=self.config.train.total_timesteps // (self.config.train.max_episode_len * self.config.env.num_envs))
+            self.actor_scheduler = WarmupLinearSchedule(optimizer=self.actor_optimizer,
+                                                        warmup_steps=0,
+                                                        max_steps=self.config.train.total_timesteps // (self.config.train.max_episode_len * self.config.env.num_envs))
+            
+            self.critic_scheduler = WarmupLinearSchedule(optimizer=self.critic_optimizer,
+                                                         warmup_steps=0,
+                                                         max_steps=self.config.train.total_timesteps // (self.config.train.max_episode_len * self.config.env.num_envs))
+                         
+            if self.config.train.gail.use:
+                self.disc_scheduler = WarmupLinearSchedule(optimizer=self.disc_optimizer,
+                                                           warmup_steps=0, 
+                                                           max_steps=self.config.train.total_timesteps // (self.config.train.max_episode_len * self.config.env.num_envs))
                     
         # reward scaler: r / rs.std()
         if self.config.train.reward_scaler:
@@ -93,15 +100,25 @@ class AMPAgent:
             sp = (config.env.state_dim, ) if isinstance(config.env.state_dim, int) else list(config.env.state_dim)
             self.obs_normalizer = ObservationNormalizer(self.config.env.num_envs, sp)
             
-        # Disriminator dataset
-        self.motion_dataset = MotionDataset(self.config.train.gail.data_dir, 
-                                            self.config.train.gail.asf_dir)
+                     
+        if self.config.train.gail.use:
+            # Disriminator dataset
+            self.motion_dataset = MotionDataset(self.config.train.gail.motion_files, 
+                                                self.config.train.gail.skeleton_file)
+            self.skeleton_info = parse_skeleton_file(self.config.train.gail.skeleton_file)
         
         
         self.timer_manager  = TimerManager()
         self.writer         = None
         self.memory         = None
         self.timesteps      = 0
+        
+        self.w_g = self.config.train.task_reward_lerp
+        self.w_s = (1 - self.w_g)
+        
+        self.episodic_reward = None
+        self.style_reward = None
+        self.duration = None
         
         logger.info("----------- Config -----------")
         pretty_config(config, logger=logger)
@@ -144,13 +161,17 @@ class AMPAgent:
         torch.save(self.actor_optimizer.state_dict(), os.path.join(ckpt_path, "actor_optimizer.pt"))
         torch.save(self.critic.state_dict(), os.path.join(ckpt_path, "critic.pt"))
         torch.save(self.critic_optimizer.state_dict(), os.path.join(ckpt_path, "critic_optimizer.pt"))
-        
-        torch.save(self.disc.state_dict(), os.path.join(ckpt_path, "discriminator.pt"))
-        torch.save(self.disc_optimizer.state_dict(), os.path.join(ckpt_path, "disc_optimizer.pt"))
+                     
+        if self.config.train.gail.use:
+            torch.save(self.disc.state_dict(), os.path.join(ckpt_path, "discriminator.pt"))
+            torch.save(self.disc_optimizer.state_dict(), os.path.join(ckpt_path, "disc_optimizer.pt"))
         
         if self.config.train.scheduler:
-            torch.save(self.scheduler.state_dict(), os.path.join(ckpt_path, "scheduler.pt"))
-            torch.save(self.disc_scheduler.state_dict(), os.path.join(ckpt_path, "disc_scheduler.pt"))
+            torch.save(self.actor_scheduler.state_dict(), os.path.join(ckpt_path, "actor_scheduler.pt"))
+            torch.save(self.critic_scheduler.state_dict(), os.path.join(ckpt_path, "critic_scheduler.pt"))
+                         
+            if self.config.train.gail.use:
+                torch.save(self.disc_scheduler.state_dict(), os.path.join(ckpt_path, "disc_scheduler.pt"))
 
         if self.config.train.reward_scaler:
             self.reward_scaler.save(ckpt_path)
@@ -180,12 +201,17 @@ class AMPAgent:
         amp_algo.critic.load_state_dict(torch.load(os.path.join(ckpt_path, "critic.pt")))
         amp_algo.critic_optimizer.load_state_dict(torch.load(os.path.join(ckpt_path, "critic_optimizer.pt")))
         
-        amp_algo.disc.load_state_dict(torch.load(os.path.join(ckpt_path, "discriminator.pt")))
-        amp_algo.disc_optimizer.load_state_dict(torch.load(os.path.join(ckpt_path, "disc_optimizer.pt")))
+        
+        if amp_algo.config.train.gail.use:
+            amp_algo.disc.load_state_dict(torch.load(os.path.join(ckpt_path, "discriminator.pt")))
+            amp_algo.disc_optimizer.load_state_dict(torch.load(os.path.join(ckpt_path, "disc_optimizer.pt")))
         
         if amp_algo.config.train.scheduler:
-            amp_algo.scheduler.load_state_dict(torch.load(os.path.join(ckpt_path, "scheduler.pt")))
-            amp_algo.disc_scheduler.load_state_dict(torch.load(os.path.join(ckpt_path, "disc_scheduler.pt")))
+            amp_algo.actor_scheduler.load_state_dict(torch.load(os.path.join(ckpt_path, "actor_scheduler.pt")))
+            amp_algo.critic_scheduler.load_state_dict(torch.load(os.path.join(ckpt_path, "critic_scheduler.pt")))
+            
+            if amp_algo.config.train.gail.use:
+                amp_algo.disc_scheduler.load_state_dict(torch.load(os.path.join(ckpt_path, "disc_scheduler.pt")))
         
         if amp_algo.config.train.reward_scaler:
             amp_algo.reward_scaler.load(ckpt_path)
@@ -299,6 +325,7 @@ class AMPAgent:
                                    batch_size=self.config.train.gail.batch_size,
                                    shuffle=True,
                                    drop_last=True)  
+        print("motion dataset size: ", len(self.motion_dataset))
         expert_iter = iter(expert_loader) 
         agent_iter  = data_iterator(self.config.train.gail.batch_size, data)    
         
@@ -317,14 +344,16 @@ class AMPAgent:
             except StopIteration as e:
                 agent_iter = data_iterator(self.config.train.gail.batch_size, data)    
                 agent_data = next(agent_iter)
-            agent_data = torch.concat([d.to(self.device) for d in agent_data[:2]], dim=1)
+            agent_data = torch.concat([d.to(self.device) for d in agent_data], dim=1)
         
             try:
                 expert_data = next(expert_iter)
             except StopIteration as e:
                 expert_iter = iter(expert_loader)   
                 expert_data = next(expert_iter)
-            expert_data = torch.concat([d.to(self.device) for d in expert_data[:2]], dim=1)        
+            expert_data = torch.concat([d.to(self.device) for d in expert_data], dim=1)        
+
+            print("Pass one iter")
 
             # Train
             agent_prob = self.disc(agent_data)
@@ -383,6 +412,19 @@ class AMPAgent:
                 
         return s, ns, a, logp, adv, v_target, v
     
+    def prepare_data_for_discriminator(self, data):
+        
+        # shape of observastion from env
+        # [[pos_i, nor_i, tan_i, lin_vel_i, ang_vel_i] for i in range(15)]
+        
+        end_effector_id = self.skeleton_info["end_effector_id"]
+        
+        s, ns = data[:2]
+        
+        print(f"s, ns: {s.shape}, {ns.shape}")
+        
+        return s, ns
+    
     def optimize(self, next_state, done):     
                     
         # ------------- Preprocessing for optimizing-------------
@@ -397,14 +439,17 @@ class AMPAgent:
         with self.timer_manager.get_timer("Backpropagation"):                
             if self.config.train.gail.use:
                 for _ in range(self.config.train.gail.epochs):
-                    with self.timer_manager.get_timer("Discrimniator optimize"):  
-                        disc_metric = self.optimize_discriminator(data)
+                    with self.timer_manager.get_timer("Prepare data for discriminator"):  
+                        disc_data = self.prepare_data_for_discriminator(data)
+                    
+                    with self.timer_manager.get_timer("Discrimniator optimize per epoch"):  
+                        disc_metric = self.optimize_discriminator(disc_data)
                     
                     for k, v in disc_metric.items():
                         metrics[k].extend(v)
                     
             for _ in range(self.config.train.ppo.epochs):
-                with self.timer_manager.get_timer("Policy optimize"):  
+                with self.timer_manager.get_timer("Policy optimize per epoch"):  
                     policy_metric = self.optimize_policy(data)
                 
                 for k, v in policy_metric.items():
@@ -422,20 +467,66 @@ class AMPAgent:
             
         # scheduling learning rate
         if self.config.train.scheduler:
-            self.scheduler.step()
-            self.disc_scheduler.step()
+            self.actor_scheduler.step()
+            self.critic_scheduler.step()
+            if self.config.train.gail.use:
+                self.disc_scheduler.step()
             
         return metrics
     
-    
-    def collect_trajectory(self, envs, state, done, episodic_reward, style_reward, duration):
+    def add_to_buffer(self, agent_id, state, next_state, action, reward, value, logprob, done):
         
         episodic_rewards = []
         style_rewards = []
         durations = []
         
-        w_g = self.config.train.coef_task_specific
-        w_s = self.config.train.coef_task_agnostic      
+        # update episodic_reward
+        self.episodic_reward[agent_id] += reward
+        self.duration[agent_id] += 1
+        
+        if self.config.train.gail.use:
+            with torch.no_grad():
+                s_reward = self.disc.get_reward(state, torch.from_numpy(next_state).to(self.device, dtype=torch.float))
+                s_reward = s_reward.squeeze(1).cpu().numpy()    
+                s_reward = s_reward * self.config.train.style_reward_scale   
+            self.style_reward[agent_id] += s_reward
+            
+            total_reward = self.w_g * reward + self.w_s * s_reward
+        else:
+            total_reward = reward
+
+        if self.config.train.reward_scaler:
+            total_reward = self.reward_scaler(agent_id, total_reward, done)
+            
+        self.memory.store(
+            agent_id=agent_id,
+            state=state,
+            action=action,
+            reward=total_reward,
+            done=done,
+            value=value,
+            logprob=logprob
+        )
+        
+        for idx, d in zip(agent_id, done):
+            if d:
+                episodic_rewards.append(self.episodic_reward[idx])
+                style_rewards.append(self.style_reward[idx])
+                durations.append(self.duration[idx])    
+
+                self.episodic_reward[idx] = 0
+                self.style_reward[idx] = 0
+                self.duration[idx] = 0   
+                
+        return episodic_rewards, style_rewards, durations 
+    
+        
+    def collect_trajectory(self, envs, state, done):
+        
+        episodic_rewards = []
+        style_rewards = []
+        durations = []
+        
         for _ in range(0, self.config.train.max_episode_len):                        
             # ------------- Collect Trajectories -------------
             '''
@@ -459,54 +550,68 @@ class AMPAgent:
                 values = self.critic(state)
                 values = values.flatten() # reshape shape of the value to (num_envs,)
                 
-            next_state, reward, terminated, truncated, _ = envs.step(np.clip(action.cpu().numpy(), envs.action_space.low, envs.action_space.high))
+            next_state, reward, terminated, truncated, info = envs.step(np.clip(action.cpu().numpy(), envs.action_space.low, envs.action_space.high))
+
+            if len(info['terminal_steps']) > 0:
+                agent_id =info['terminal_steps'].agent_id
+                ns, r, te, tr = info['terminal_state']
+                
+                e, s, d = self.add_to_buffer(agent_id=info['terminal_steps'].agent_id,
+                                             state=state[agent_id],
+                                             next_state=ns,
+                                             action=action[agent_id],
+                                             reward=r,
+                                             value=values[agent_id],
+                                             logprob=logprobs[agent_id],
+                                             done=te + tr)
+                episodic_rewards.extend(e)
+                style_rewards.extend(s)
+                durations.extend(d)
+            
+            while len(info['decision_steps']) == 0:                
+                empty_ac = np.empty((0, *envs.action_space.shape))   
+                next_state, reward, terminated, truncated, info = envs.step(empty_ac)
+
+                if len(info['terminal_steps']) > 0:
+                    agent_id = info['terminal_steps'].agent_id
+                    ns, r, te, tr = info['terminal_state']
+                
+                    e, s, d = self.add_to_buffer(agent_id=info['terminal_steps'].agent_id,
+                                                state=state[agent_id],
+                                                next_state=ns,
+                                                action=action[agent_id],
+                                                reward=r,
+                                                value=values[agent_id],
+                                                logprob=logprobs[agent_id],
+                                                done=te + tr)
+                    episodic_rewards.extend(e)
+                    style_rewards.extend(s)
+                    durations.extend(d)
+
 
             self.timesteps += self.config.env.num_envs
-
-            # update episodic_reward
-            episodic_reward += reward
-            duration += 1
             
-            if self.config.train.gail.use:
-                with torch.no_grad():
-                    s_reward = self.disc.get_reward(state, torch.from_numpy(next_state).to(self.device, dtype=torch.float))
-                    s_reward = s_reward.squeeze(1).cpu().numpy()       
-                style_reward += s_reward
-                
-                total_reward = w_g * reward + w_s * s_reward
-            else:
-                total_reward = reward
-
-            if self.config.train.reward_scaler:
-                total_reward = self.reward_scaler(total_reward, terminated + truncated)
-                
-            # add experience to the memory                    
-            self.memory.store(
-                state=state,
-                action=action,
-                reward=total_reward,
-                done=done,
-                value=values,
-                logprob=logprobs
-            )
+            # add experience to the memory   
+            e, s, d = self.add_to_buffer(agent_id=info['decision_steps'].agent_id,
+                               state=state,
+                               next_state=next_state,
+                               action=action,
+                               reward=reward,
+                               value=values,
+                               logprob=logprobs,
+                               done=terminated + truncated)  
+            episodic_rewards.extend(e)
+            style_rewards.extend(s)
+            durations.extend(d)
+            
             done = terminated + truncated
-
-            for idx, d in enumerate(done):
-                if d:
-                    episodic_rewards.append(episodic_reward[idx])
-                    style_rewards.append(style_reward[idx])
-                    durations.append(duration[idx])    
-
-                    episodic_reward[idx] = 0
-                    style_reward[idx] = 0
-                    duration[idx] = 0            
             
             # update state
             state = next_state  
             
         return {
             "train/score": episodic_rewards,
-            "train/style_reward": style_reward,
+            "train/style_reward": style_rewards,
             "train/duration": durations
         }, next_state, done
         
@@ -541,13 +646,14 @@ class AMPAgent:
         writer_path     = os.path.join( self.config.experiment_path, 'runs')
         self.writer     = SummaryWriter(writer_path)
 
-        episodic_reward = np.zeros(self.config.env.num_envs)
-        duration        = np.zeros(self.config.env.num_envs)
-        style_reward    = np.zeros(self.config.env.num_envs)
+        self.episodic_reward = np.zeros(self.config.env.num_envs)
+        self.duration        = np.zeros(self.config.env.num_envs)
+        self.style_reward    = np.zeros(self.config.env.num_envs)
         best_score      = -1e9
         
         # ==== Make rollout buffer
-        self.memory = ReplayBuffer(            
+        self.memory = UnityReplayBuffer(   
+            num_of_agents=self.config.env.num_envs,
             gamma=self.config.train.gamma,
             tau=self.config.train.tau,
             device=self.device,
@@ -561,10 +667,11 @@ class AMPAgent:
         state        (num_envs, (obs_space))     numpy.ndarray
         reward       (num_envs,)                 numpy.ndarray
         term         (num_envs,)                 numpy.ndarray
+        trunc        (num_envs,)                 numpy.ndarray
         done         (num_envs,)                 numpy.ndarray
         ===========  ==========================  ==================
         '''
-        next_state, _  = envs.reset(seed=self.config.seed)
+        next_state, _  = envs.reset() #envs.reset(seed=self.config.seed)
         done = np.zeros(self.config.env.num_envs)
         self.next_action_std_decay_step = self.config.actor.action_std_decay_freq        
         
@@ -574,7 +681,7 @@ class AMPAgent:
             
             with self.timer_manager.get_timer("Total"):
                 with self.timer_manager.get_timer("Collect Trajectory"):
-                    step_metrics, next_state, done = self.collect_trajectory(envs, next_state, done, episodic_reward, style_reward, duration)
+                    step_metrics, next_state, done = self.collect_trajectory(envs, next_state, done)
                         
                 with self.timer_manager.get_timer("Optimize"):  
                     optimize_metrics = self.optimize(next_state, done)  
@@ -589,10 +696,10 @@ class AMPAgent:
                 self.writer.add_scalar(k, avg, self.timesteps)                  
         
             if self.config.train.scheduler:
-                for idx, lr in enumerate(self.scheduler.get_lr()):
-                    self.writer.add_scalar(f"train/learning_rate{idx}", lr, self.timesteps)
-                for idx, lr in enumerate(self.disc_scheduler.get_lr()):
-                    self.writer.add_scalar(f"train_gail/learning_rate{idx}", lr, self.timesteps)
+                self.writer.add_scalar(f"train/actor_learning_rate", self.actor_scheduler.get_lr()[0], self.timesteps)
+                self.writer.add_scalar(f"train/critic_learning_rate", self.critic_scheduler.get_lr()[0], self.timesteps)
+                if self.config.train.gail.use:
+                    self.writer.add_scalar(f"train_gail/learning_rate", self.disc_scheduler.get_lr()[0], self.timesteps)
 
             # Printing for console
             remaining_num_of_optimize   = int(math.ceil((self.config.train.total_timesteps - self.timesteps) /

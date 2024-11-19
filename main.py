@@ -5,7 +5,7 @@ import logging
 import gymnasium as gym
 from gymnasium.vector import AsyncVectorEnv
 
-import custom_env
+from envs.unity_env import VertorizedUnityEnv
 
 from algo.agent import AMPAgent
 from algo.utils.general import get_config
@@ -57,7 +57,8 @@ def main():
         trainer = AMPAgent(config)        
 
     if args.train:
-        envs = AsyncVectorEnv([make_env(config.env.env_name) for _ in range(config.env.num_envs)])
+        #envs = AsyncVectorEnv([make_env(config.env.env_name) for _ in range(config.env.num_envs)])
+        envs = VertorizedUnityEnv(config.env.env_name)
         trainer.train(envs, args.exp_name)
 
     if args.eval:
