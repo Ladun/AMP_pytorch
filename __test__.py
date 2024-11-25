@@ -10,15 +10,19 @@ import omegaconf
 
 import torch
 from torch import nn
+from torch.utils.data.sampler import WeightedRandomSampler
 
 import gymnasium as gym
 from gymnasium.vector import AsyncVectorEnv
 
-from algo.utils.general import TimerManager, set_seed
+from algo.models.policy import Actor
+from algo.models.discriminator import Discriminator
+from algo.utils.general import TimerManager, set_seed, get_config, get_device
 from algo.data.preprocess_cmu_data import (
     parse_amc, parse_asf, create_joint_mapping, parse_humanoid_xml,
     convert_amc_to_walker_state
 )
+from algo.data.preprocess_deepmimic_data import get_disc_motion_dim, parse_skeleton_file
 from algo.data.motion_dataset import MotionDataset
 
 def get_inference_video(frame, total_time, vid_name="render.png"):
@@ -232,18 +236,39 @@ def unity_env_test():
 def motion_dataset_test():
     from torch.utils.data import DataLoader
     
-    dataset = MotionDataset(["data/deepmimic/humanoid3d_run.txt", 
-                             "data/deepmimic/humanoid3d_walk.txt", 
-                             "data/deepmimic/humanoid3d_backflip.txt"], 
-                            "data/deepmimic/humanoid3d.txt")
+    config = get_config("configs/Humanoid_unity.yaml")
+        
+    motion_dataset = MotionDataset(config.train.gail.dataset_file, config.train.gail.skeleton_file)
     
-    print(len(dataset))    
-    loader = DataLoader(dataset, 
-                        batch_size=30,
-                        shuffle=True,
-                        drop_last=True)  
-    loader_iter = iter(loader)
-    s, ns = next(loader_iter)
+    weight_sum = sum(motion_dataset.weights)
+    weights = weight_sum / np.array(motion_dataset.weights)
+    sampler = WeightedRandomSampler(weights, num_samples=len(motion_dataset), replacement=True)
+    
+    print(len(motion_dataset.weights), weight_sum)
+    print(set(motion_dataset.weights))
+    
+    loader = DataLoader(motion_dataset, 
+                        batch_size=config.train.gail.batch_size,
+                        drop_last=True,
+                        sampler=sampler)  
+    
+    for i, (s, ns) in enumerate(loader):
+        print(f"[{i}] {s.shape}, {ns.shape}")
+        
+def actor_test_for_onnx():
+    set_seed(0)
+    
+    device = get_device("cpu")
+    config = get_config(os.path.join("checkpoints/Humanoid/exp20241120193131", "config.yaml"))   
+    policy = Actor(config, device)    
+    
+    temp_x = torch.ones(4, config.env.state_dim, requires_grad=True)
+    action, log_prob, ent = policy(temp_x)
+    
+    print(action, log_prob, ent)
+    print(action.shape, log_prob.shape, ent.shape)
+    
+
     
 # images = get_inference_video(240, 1)
 # print(len(images))
@@ -262,4 +287,18 @@ def motion_dataset_test():
 # unity_env_test()
 
 
-motion_dataset_test()
+# motion_dataset_test()
+
+# actor_test_for_onnx()
+
+
+set_seed(1)
+
+parse_skeleton_file = parse_skeleton_file("data/characters/humanoid3d.txt")
+device = get_device("cpu")
+config = get_config("configs/Humanoid_unity.yaml") 
+disc = Discriminator(config, get_disc_motion_dim(parse_skeleton_file) * 2)    
+
+d = torch.rand(4, get_disc_motion_dim(parse_skeleton_file) * 2)
+
+print(disc.compute_gradient_penalty(d))

@@ -1,7 +1,8 @@
 
 import torch
+
 from torch import nn
-from torch.distributions import MultivariateNormal
+from torch.distributions import MultivariateNormal, Normal
 
 from .functions import *
 
@@ -14,7 +15,7 @@ class Critic(nn.Module):
         self.device     = device    
         
         activation_func = nn.ReLU        
-        in_dim = config.env.state_dim
+        in_dim = config.env.state_dim + config.env.goal_dim
         self.m = []
         for hidden in config.actor.hidden_dim:
             self.m.append(nn.Linear(in_dim, hidden))
@@ -27,7 +28,7 @@ class Critic(nn.Module):
         
     def forward(self, state):
         return self.m(state)
-
+    
 class Actor(nn.Module):
     def __init__(self, config, device):
         super().__init__()
@@ -35,6 +36,8 @@ class Actor(nn.Module):
         # -------- Initialize variables --------
 
         self.device     = device
+        self.state_dim  = config.env.state_dim
+        self.goal_dim   = config.env.goal_dim
 
         # if action space is defined as continuous, make variance
         self.action_dim = config.env.action_dim
@@ -44,7 +47,7 @@ class Actor(nn.Module):
         # self.actor_logstd = nn.Parameter(torch.log(torch.ones(1, config.env.action_dim) * config.network.action_std_init))
 
         activation_func = nn.ReLU
-        in_dim = config.env.state_dim
+        in_dim = self.state_dim + self.goal_dim
         self.m = []
         for hidden in config.actor.hidden_dim:
             self.m.append(nn.Linear(in_dim, hidden))
@@ -74,10 +77,14 @@ class Actor(nn.Module):
         # continuous space action 
         action_mean = self.m(state)
 
-        action_var = self.action_var.expand_as(action_mean)
-        cov_mat = torch.diag_embed(action_var).to(self.device)
-        dist = MultivariateNormal(action_mean, cov_mat)
-
+        #action_var = self.action_var.expand_as(action_mean)
+        #cov_mat = torch.diag_embed(action_var).to(self.device)
+        #cov_mat = action_var.unsqueeze(1) * torch.eye(action_var.size()[-1]).to(self.device)        
+        #dist = MultivariateNormal(action_mean, cov_mat)
+        
+        
+        dist = Normal(action_mean, self.action_var)
+        
         # for learnable std
         # action_logstd = self.actor_logstd.expand_as(action_mean)
         # action_std = torch.exp(action_logstd)
@@ -88,4 +95,4 @@ class Actor(nn.Module):
         if action is None:
             action = dist.sample()
 
-        return action, dist.log_prob(action), dist.entropy()
+        return action, dist.log_prob(action).sum(-1), dist.entropy().sum(-1)

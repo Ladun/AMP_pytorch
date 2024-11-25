@@ -5,14 +5,14 @@ from torch import nn
 from .functions import *
 
 class Discriminator(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, state_dim):
         super().__init__()
 
         hidden_dim = config.train.gail.hidden_dim
         activation_func = nn.ReLU
-        in_dim = config.env.state_dim * 2
+        in_dim = state_dim
         self.m = []
-        for hidden in config.actor.hidden_dim:
+        for hidden in hidden_dim:
             self.m.append(nn.Linear(in_dim, hidden))
             self.m.append(activation_func())
             in_dim = hidden
@@ -31,7 +31,7 @@ class Discriminator(nn.Module):
         concat_state = torch.concat([state, next_state], dim=1)
         prob = self(concat_state)
         
-        reward = torch.clamp(1 - 0.25 * torch.square(1 - prob), min=0)
+        reward = torch.clamp(1 - 0.25 * torch.square(prob - 1), min=0)
         
         return reward
     
@@ -55,6 +55,6 @@ class Discriminator(nn.Module):
         )[0]
         
         # Calculate L2 norm of the gradients
-        gradients = gradients.view(gradients.size(0), -1)
-        gradient_penalty = (gradients.norm(2, dim=1) ** 2).mean()
-        return gradient_penalty
+        gradient_penalty = (gradients.norm(2, dim=-1)).mean()
+        return 0.5 * gradient_penalty
+    

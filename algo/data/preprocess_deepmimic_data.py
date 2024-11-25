@@ -24,8 +24,19 @@ DOFS = {
         [ 13, 1]  # left elbow rotation
     ]
 }
+    
+def get_disc_motion_dim(skeleton_info):
+    
+    dofs = DOFS["Humanoid"]
+    dim = 0    
+    dim += 6
+    dim += len(dofs[2:]) * 12
+    dim += len( skeleton_info["end_effector_id"]) * 3
+    
+    return dim
+    
 
-def parse_skeleton_file(path):
+def parse_skeleton_file(path) -> dict:
     
     with open(path, "r") as f:
         d = json.load(f)        
@@ -91,7 +102,10 @@ def parse_motion_file(path, skeleton_info) -> np.array:
             # 2. root angular velocity
             obs.append(get_angular_vel(cur_joints[0][3:7], prev_joints[0][3:7], duration))
         
-        for key, _ in dofs[1:]:
+        # root position and rotation
+        positions[0] = calc_cur_pos(0, positions, rotations, skeleton_info)
+        rotations[0] = get_rotation(cur_joints[0])
+        for key, _ in dofs[2:]:
             cur_j = cur_joints[key]    
             
             # local rotation (normal, tangent vector)
@@ -121,9 +135,7 @@ def parse_motion_file(path, skeleton_info) -> np.array:
                 prev_pos = all_positions[i - 1][key]
                 
                 # calc current position
-                parent_pos = positions[skeleton_info["joints"][key]["Parent"]]
-                parent_rot = rotations[skeleton_info["joints"][key]["Parent"]]
-                cur_pos = parent_pos + quat_vec_multiply(parent_rot, np.array([skeleton_info["joints"][key][f"Attach{v}"] for v in ["X", "Y", "Z"]]))
+                cur_pos = calc_cur_pos(key, positions, rotations, skeleton_info)
                 positions[key] = cur_pos
             
                 # Calculate velocity
@@ -132,19 +144,23 @@ def parse_motion_file(path, skeleton_info) -> np.array:
                 # 6. angular velocity
                 obs.append(get_angular_vel(get_rotation(cur_j), get_rotation(prev_joints[key]), duration))
         
-        # end effector position
+        # 7. end effector position
         for key in skeleton_info["end_effector_id"]:
-            parent_pos = positions[skeleton_info["joints"][key]["Parent"]]
-            parent_rot = rotations[skeleton_info["joints"][key]["Parent"]]
-            cur_pos = parent_pos + quat_vec_multiply(parent_rot, np.array([skeleton_info["joints"][key][f"Attach{v}"] for v in ["X", "Y", "Z"]]))
-            
-            obs.append(cur_pos)        
+            obs.append(calc_cur_pos(key, positions, rotations, skeleton_info))        
         
         all_positions.append(positions)            
         observations.append(np.concatenate(obs))
     
     observations = np.stack(observations).astype(np.float32)
     return observations    
+    
+    
+def calc_cur_pos(key, positions, rotations, skeleton_info):
+    parent_pos = positions[skeleton_info["joints"][key]["Parent"]]
+    parent_rot = rotations[skeleton_info["joints"][key]["Parent"]]
+    cur_pos = parent_pos + quat_vec_multiply(parent_rot, np.array([skeleton_info["joints"][key][f"Attach{v}"] for v in ["X", "Y", "Z"]]))
+    return cur_pos
+            
     
     
 def get_rotation(values: np.array) -> np.array:

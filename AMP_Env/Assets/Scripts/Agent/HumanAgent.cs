@@ -12,6 +12,7 @@ public class HumanAgent : Agent
 
     public Skeleton skeleton;
     public TrainingEnv env;
+    public MotionDatabase motionDatabase;
 
     private Transform root;
     private JointDriveController jdController;
@@ -21,6 +22,11 @@ public class HumanAgent : Agent
     #region MLAgents function
     public override void Initialize()
     {
+        if(motionDatabase == null)
+            motionDatabase = FindFirstObjectByType<MotionDatabase>();
+
+        motionDatabase.LoadDataset(false);
+
         skeleton.CreateSkeleton();
         root = skeleton.GetJoints()[0];
         jdController = GetComponent<JointDriveController>();
@@ -47,6 +53,7 @@ public class HumanAgent : Agent
         {
             bodyPart.Reset(bodyPart);
         }
+        skeleton.SetAnimationData(motionDatabase.GetRandomMotionData(), true);
 
         //Random start rotation to help generalize
         root.rotation = Quaternion.Euler(0, Random.Range(0.0f, 360.0f), 0);
@@ -65,6 +72,12 @@ public class HumanAgent : Agent
             sensor.AddObservation(obs.tangents[i]);
             sensor.AddObservation(obs.linearVels[i]);
             sensor.AddObservation(obs.angularVels[i]);
+        }
+        var goals = env.GetGoals(skeleton);
+
+        foreach (var g in goals)
+        {
+            sensor.AddObservation(g);
         }
     }
 

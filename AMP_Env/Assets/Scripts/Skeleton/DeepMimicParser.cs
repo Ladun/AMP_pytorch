@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
 using UnityEngine;
 
 namespace AMP
@@ -134,10 +135,10 @@ namespace AMP
 
        
 
-        public void Parse(UnityEngine.Object skeletonFile)
+        public void Parse(string skeletonFile)
         {
-            // DeepMimic에서는 x방향이 front이기 때문에 서로 값(x<->z)을 바꿈.
-            string text = Utils.ReadTextFile(skeletonFile);
+            string path = Path.Combine(Utils.GetCurrentPath(), skeletonFile);
+            string text = Utils.ReadTextFile(path);
 
             if (string.IsNullOrEmpty(text))
             {

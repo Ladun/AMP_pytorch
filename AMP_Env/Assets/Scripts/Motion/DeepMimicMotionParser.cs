@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using Newtonsoft.Json;
 using System.Linq;
+using System.IO;
 
 namespace AMP
 {
@@ -17,6 +18,7 @@ namespace AMP
             public string Loop;
             public float[,] Frames;
         }
+        #endregion
 
         // {ID, dofs}
         private int[,] dofs = new int[,]
@@ -38,16 +40,16 @@ namespace AMP
         };
 
 
-        #endregion
-        public override List<MotionFrameData> LoadData()
+        public override List<MotionFrameData> LoadData(string motionFilePath)
         {
             List<MotionFrameData> motionFrameData = new List<MotionFrameData>();
 
-            string text = Utils.ReadTextFile(motionFile);
+            string path = Path.Combine(Utils.GetCurrentPath(), motionFilePath);
+            string text = Utils.ReadTextFile(path);
 
             if (string.IsNullOrEmpty(text))
             {
-                Debug.LogWarning($"Wrong text {motionFile}");
+                Debug.LogWarning($"Wrong path {motionFilePath}");
                 return null;
             }
 

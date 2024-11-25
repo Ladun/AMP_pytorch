@@ -4,9 +4,8 @@ using UnityEngine;
 
 namespace AMP
 {
-    public abstract class MotionParser : MonoBehaviour
+    public abstract class MotionParser
     {
-        public UnityEngine.Object motionFile;
-        public abstract List<MotionFrameData> LoadData();
+        public abstract List<MotionFrameData> LoadData(string motionFilePath);
     }
 }

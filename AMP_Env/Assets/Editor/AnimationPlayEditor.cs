@@ -12,6 +12,7 @@ namespace AMP
     {
 
         private Rect animBarRect;
+        private int motionKey = 0;
 
         public override void OnInspectorGUI()
         {
@@ -21,24 +22,40 @@ namespace AMP
 
             DrawCustomScriptField();
             EditorGUIUtility.labelWidth = 100; // 라벨 너비를 80픽셀로 설정
-            EditorGUILayout.PropertyField(serializedObject.FindProperty("motionParser"));
+            EditorGUILayout.PropertyField(serializedObject.FindProperty("motionDatabase"));
             EditorGUILayout.PropertyField(serializedObject.FindProperty("skeleton"));
             EditorGUILayout.Space(10);
             EditorGUILayout.LabelField("Animation Play Property", EditorStyles.boldLabel);
 
-            int currentFrame = EditorGUILayout.IntField("Current Frame", p.currentFrame);
-            UpdateFrame(currentFrame);
-            GUILayout.Space(5);
-
-            if (p.frameData != null && p.currentFrameData != null)
+            if (p.motionDatabase)
             {
-                DrawAnimationRegion();
-            }
+                if (p.motionDatabase.HasMotion)
+                {
+                    var keys = p.motionDatabase.GetMotionKeys();
 
-            GUILayout.Space(35);
-            if (GUILayout.Button("Load data", GUILayout.Width(200)))
-            {
-                p.LoadData();
+                    int newKey = EditorGUILayout.Popup(motionKey, keys);
+                    if (newKey != motionKey)
+                    {
+                        p.LoadData(keys[newKey]);
+                    }
+
+                    int currentFrame = EditorGUILayout.IntField("Current Frame", p.currentFrame);
+                    UpdateFrame(currentFrame);
+                    GUILayout.Space(5);
+
+                    if (p.frameData != null && p.currentFrameData != null)
+                    {
+                        DrawAnimationRegion();
+                    }
+
+                }
+
+                GUILayout.Space(35);
+                if (GUILayout.Button("Update motion database", GUILayout.Width(200)))
+                {
+                    p.motionDatabase.LoadDataset();
+                    p.LoadData(p.motionDatabase.GetMotionKeys()[0]);
+                }
             }
             HandleInput();
 

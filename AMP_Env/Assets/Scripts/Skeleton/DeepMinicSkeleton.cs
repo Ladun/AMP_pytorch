@@ -117,7 +117,7 @@ namespace AMP
             }
             foreach (var entry in bodyTransforms)
             {
-                entry.Value.localScale = parser.draws[entry.Key].param * LENGTH_SCALE;
+                //entry.Value.localScale = parser.draws[entry.Key].param * LENGTH_SCALE;
             }
 
             RecordPrevState();
@@ -126,7 +126,7 @@ namespace AMP
         private GameObject CreateBodyShapeObject(DeepMimicParser.DrawShape body)
         {
             GameObject bodyObj = null;
-            Vector3 mod = Vector3.zero;
+            Vector3 bodyParam = body.param * LENGTH_SCALE;
             if(body.shape == "sphere")
             {
                 bodyObj = GameObject.CreatePrimitive(PrimitiveType.Sphere);
@@ -134,7 +134,7 @@ namespace AMP
             else if(body.shape == "capsule")
             {
                 bodyObj = GameObject.CreatePrimitive(PrimitiveType.Capsule);
-                mod.y = -1f;
+                bodyParam.y -= bodyParam.y * 0.25f;
             }
             else if(body.shape == "box")
             {
@@ -155,7 +155,7 @@ namespace AMP
             bodyObj.transform.SetParent(parent);
             bodyObj.transform.localPosition = body.attachPos * LENGTH_SCALE;
             bodyObj.transform.localRotation = Quaternion.Euler(body.attachTheta * Mathf.Rad2Deg);
-            bodyObj.transform.localScale = body.param * LENGTH_SCALE;
+            bodyObj.transform.localScale = bodyParam;
 
             return bodyObj;
         }
@@ -224,7 +224,7 @@ namespace AMP
             return jointObj;
 
         }
-        public override void SetAnimationData(MotionFrameData motionFrameData)
+        public override void SetAnimationData(MotionFrameData motionFrameData, bool ignoreRootPos=false)
         {
             RecordPrevState();
             curMotionFrameData = motionFrameData;
@@ -245,7 +245,8 @@ namespace AMP
                 }
                 else
                 {
-                    joint.localPosition = new Vector3(values[0], values[1], values[2]) * LENGTH_SCALE;
+                    if(!ignoreRootPos)
+                        joint.localPosition = new Vector3(values[0], values[1], values[2]) * LENGTH_SCALE;
                     joint.localRotation = new Quaternion(values[4], values[5], values[6], values[3]);
                 }
             }
@@ -325,6 +326,15 @@ namespace AMP
 
         private void OnDrawGizmosSelected()
         {
+            if(jointTransforms.ContainsKey(0))
+            {
+                Transform root = jointTransforms[0];
+                Vector3 d = root.rotation * Vector3.right;
+                d.y = 0;
+
+                Debug.DrawLine(root.position, root.position + d, Color.magenta);
+            }
+
             if (curMotionFrameData != null)
             {
                 Dictionary<int, Vector3> parentPos = new Dictionary<int, Vector3>();
@@ -346,7 +356,7 @@ namespace AMP
                     // from data
                     Quaternion rot = Quaternion.identity;
                     int p = k;
-                    while (p != -1)
+                    while (p > 0)
                     {
                         var values = curMotionFrameData.JointData[p + ""];
                         rot = GetRotFromMotionData(values) * rot;
@@ -367,7 +377,7 @@ namespace AMP
                     // Using unity system from scratch
                     rot = Quaternion.identity;
                     p = k;
-                    while (p != -1)
+                    while (p > 0)
                     {
                         rot = jointTransforms[p].localRotation * rot;
                         p = parser.joints[p].parentId;

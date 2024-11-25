@@ -15,6 +15,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
+from torch.utils.data.sampler import WeightedRandomSampler
 from torch.utils.tensorboard import SummaryWriter
 
 from .models.policy import Actor, Critic
@@ -27,8 +28,8 @@ from .utils.general import (
     get_config, get_rng_state, set_rng_state,
     TimerManager, get_device
 )
-from .utils.stuff import RewardScaler, ObservationNormalizer
-from .data.preprocess_deepmimic_data import parse_skeleton_file
+from .utils.stuff import RewardScaler, Normalizer
+from .data.preprocess_deepmimic_data import parse_skeleton_file, DOFS, get_disc_motion_dim
 
 logger = logging.getLogger(__name__)
 
@@ -46,19 +47,28 @@ def data_iterator(batch_size, given_data):
 
 
 class AMPAgent:
-    def __init__(self, config):
+    def __init__(self, config, eval=False):
         
         self.config = config
         self.device = get_device(config.device)
         
         set_seed(self.config.seed)
-        
-        
+               
+        # -------- Define gail dataset --------            
+                     
+        if self.config.train.gail.use:
+            # Disriminator dataset
+            if not eval:
+                self.motion_dataset = MotionDataset(self.config.train.gail.dataset_file, 
+                                                    self.config.train.gail.skeleton_file)
+            self.skeleton_info = parse_skeleton_file(self.config.train.gail.skeleton_file)
+            
         # -------- Define models --------
         
         self.actor = Actor(config, self.device).to(self.device) 
         self.critic = Critic(config, self.device).to(self.device) 
-        self.disc = Discriminator(config).to(self.device) 
+        if self.config.train.gail.use:
+            self.disc = Discriminator(config, get_disc_motion_dim(self.skeleton_info) * 2).to(self.device) 
         
         # -------- Define train supporter ---------
                
@@ -98,14 +108,12 @@ class AMPAgent:
         # observation scaler: (ob - ob.mean()) / (ob.std())
         if self.config.train.observation_normalizer:
             sp = (config.env.state_dim, ) if isinstance(config.env.state_dim, int) else list(config.env.state_dim)
-            self.obs_normalizer = ObservationNormalizer(self.config.env.num_envs, sp)
+            self.obs_normalizer = Normalizer(self.config.env.num_envs, sp, "obs")
             
-                     
-        if self.config.train.gail.use:
-            # Disriminator dataset
-            self.motion_dataset = MotionDataset(self.config.train.gail.motion_files, 
-                                                self.config.train.gail.skeleton_file)
-            self.skeleton_info = parse_skeleton_file(self.config.train.gail.skeleton_file)
+        
+        if self.config.train.goal_normalizer:
+            sp = (config.env.goal_dim, ) 
+            self.goal_normalizer = Normalizer(self.config.env.num_envs, sp, "goal")
         
         
         self.timer_manager  = TimerManager()
@@ -177,6 +185,8 @@ class AMPAgent:
             self.reward_scaler.save(ckpt_path)
         if self.config.train.observation_normalizer:
             self.obs_normalizer.save(ckpt_path)
+        if self.config.train.goal_normalizer:
+            self.goal_normalizer.save(ckpt_path)
 
         # save random state
         torch.save(get_rng_state(), os.path.join(ckpt_path, 'rng_state.pkl'))
@@ -186,11 +196,11 @@ class AMPAgent:
     
     
     @classmethod
-    def load(cls, experiment_path, postfix, resume=True):
+    def load(cls, experiment_path, postfix, resume=True, eval=False):
 
         config = get_config(os.path.join(experiment_path, "config.yaml"))
         config.actor.action_std_init = config.actor.min_action_std
-        amp_algo = AMPAgent(config)
+        amp_algo = AMPAgent(config, eval)
         
         # Create a variable to indicate which path the model will be read from
         ckpt_path = os.path.join(experiment_path, "checkpoints", postfix)
@@ -217,6 +227,8 @@ class AMPAgent:
             amp_algo.reward_scaler.load(ckpt_path)
         if amp_algo.config.train.observation_normalizer:
             amp_algo.obs_normalizer.load(ckpt_path)
+        if amp_algo.config.train.goal_normalizer:
+            amp_algo.goal_normalizer.load(ckpt_path)
 
         # load random state
         set_rng_state(torch.load(os.path.join(ckpt_path, 'rng_state.pkl'), map_location='cpu'))
@@ -321,15 +333,18 @@ class AMPAgent:
 
     def optimize_discriminator(self, data):
         
+        weight_sum = sum(set(self.motion_dataset.weights))
+        weights = weight_sum / np.array(self.motion_dataset.weights)
+        sampler = WeightedRandomSampler(weights, num_samples=len(data[0]), replacement=True)
+        
         expert_loader = DataLoader(self.motion_dataset, 
                                    batch_size=self.config.train.gail.batch_size,
-                                   shuffle=True,
-                                   drop_last=True)  
-        print("motion dataset size: ", len(self.motion_dataset))
+                                   drop_last=True,
+                                   sampler=sampler)  
         expert_iter = iter(expert_loader) 
         agent_iter  = data_iterator(self.config.train.gail.batch_size, data)    
         
-        iter_len = max(len(data[0]), len(expert_loader)) // self.config.train.gail.batch_size
+        iter_len = len(data[0]) // self.config.train.gail.batch_size
     
         loss_fn = nn.MSELoss()
         discriminator_losses = []
@@ -351,9 +366,7 @@ class AMPAgent:
             except StopIteration as e:
                 expert_iter = iter(expert_loader)   
                 expert_data = next(expert_iter)
-            expert_data = torch.concat([d.to(self.device) for d in expert_data], dim=1)        
-
-            print("Pass one iter")
+            expert_data = torch.concat([d.to(self.device) for d in expert_data], dim=1)      
 
             # Train
             agent_prob = self.disc(agent_data)
@@ -368,7 +381,7 @@ class AMPAgent:
             if self.config.train.gail.gradient_penalty_weight != 0:            
                 # calculate gradient penalty
                 gradient_penalty = self.disc.compute_gradient_penalty(expert_data)                
-                loss += self.config.train.gail.gradient_penalty_weight * 0.5 * gradient_penalty
+                loss += self.config.train.gail.gradient_penalty_weight * gradient_penalty
             
 
             self.disc_optimizer.zero_grad()
@@ -396,7 +409,9 @@ class AMPAgent:
         # Estimate next state value for gae
         with torch.no_grad():
             if self.config.train.observation_normalizer:
-                next_state = self.obs_normalizer(next_state)
+                next_state[:,  :self.config.env.state_dim] = self.obs_normalizer(next_state[:,  :self.config.env.state_dim])
+            if self.config.train.goal_normalizer:
+                next_state[:, self.config.env.state_dim: ] = self.goal_normalizer(next_state[:, self.config.env.state_dim: ])
             next_value = self.critic(torch.Tensor(next_state).to(self.device))
             next_value = next_value.flatten()
         
@@ -412,17 +427,45 @@ class AMPAgent:
                 
         return s, ns, a, logp, adv, v_target, v
     
+    def convert_data_in_disc_form(self, data):
+        
+        def get_data_by_id(d, id):
+            p = 5 * 3 * id
+            return d[:, p: p + 15]
+        
+        obs = []
+        end_effector_id = self.skeleton_info["end_effector_id"]
+        dofs = DOFS["Humanoid"]
+        
+        # 1. root linear velocity
+        obs.append(get_data_by_id(data, 0)[:, 9:12])
+        # 2. root angular velocity
+        obs.append(get_data_by_id(data, 0)[:, 12:15])
+        
+        for key, _ in dofs[2:]:
+            # 3. normal vector
+            obs.append(get_data_by_id(data, key)[:, 3:6])
+            # 4. tangent vector
+            obs.append(get_data_by_id(data, key)[:, 6:9])
+            # 5. linear velocity
+            obs.append(get_data_by_id(data, key)[:, 9:12])
+            # 6. angular velocity
+            obs.append(get_data_by_id(data, key)[:, 12:15]) 
+            
+        # 7. end effector position
+        for key in end_effector_id:
+            obs.append(get_data_by_id(data, key)[:, 0:3])   
+        
+        obs = torch.concat(obs, dim=1)
+        return obs
     def prepare_data_for_discriminator(self, data):
         
         # shape of observastion from env
         # [[pos_i, nor_i, tan_i, lin_vel_i, ang_vel_i] for i in range(15)]
-        
-        end_effector_id = self.skeleton_info["end_effector_id"]
-        
-        s, ns = data[:2]
-        
-        print(f"s, ns: {s.shape}, {ns.shape}")
-        
+        s, ns = data[:2]        
+        s = self.convert_data_in_disc_form(s)
+        ns = self.convert_data_in_disc_form(ns)
+                
         return s, ns
     
     def optimize(self, next_state, done):     
@@ -486,7 +529,9 @@ class AMPAgent:
         
         if self.config.train.gail.use:
             with torch.no_grad():
-                s_reward = self.disc.get_reward(state, torch.from_numpy(next_state).to(self.device, dtype=torch.float))
+                d_state = self.convert_data_in_disc_form(state)
+                d_next_state = self.convert_data_in_disc_form(torch.from_numpy(next_state).to(self.device, dtype=torch.float))
+                s_reward = self.disc.get_reward(d_state, d_next_state)
                 s_reward = s_reward.squeeze(1).cpu().numpy()    
                 s_reward = s_reward * self.config.train.style_reward_scale   
             self.style_reward[agent_id] += s_reward
@@ -544,7 +589,9 @@ class AMPAgent:
                 
             with torch.no_grad():
                 if self.config.train.observation_normalizer:
-                    state = self.obs_normalizer(state)
+                    state[:,  :self.config.env.state_dim] = self.obs_normalizer(state[:,  :self.config.env.state_dim])
+                if self.config.train.goal_normalizer:
+                    state[:, self.config.env.state_dim: ] = self.goal_normalizer(state[:, self.config.env.state_dim: ])
                 state = torch.from_numpy(state).to(self.device, dtype=torch.float)
                 action, logprobs, _ = self.actor(state)
                 values = self.critic(state)
@@ -725,14 +772,17 @@ class AMPAgent:
         
     
     def eval(self, env, max_ep_len, num_episodes=10):  
+        
+        self.episodic_reward = np.zeros(self.config.env.num_envs)
+        self.duration        = np.zeros(self.config.env.num_envs)
 
         rewards = []
         durations = []
 
         for episode in range(num_episodes):
 
-            episodic_reward = 0
-            duration = 0
+            episodic_rewards = []
+            durations = []
             state, _ = env.reset()
 
             for t in range(max_ep_len):
@@ -741,26 +791,56 @@ class AMPAgent:
 
                 with torch.no_grad():
                     if self.config.train.observation_normalizer:
-                        state = self.obs_normalizer(state, update=False)
-                    action, _, _ = self.actor(torch.from_numpy(state).unsqueeze(0).to(self.device, dtype=torch.float))
+                        state[:,  :self.config.env.state_dim] = self.obs_normalizer(state[:,  :self.config.env.state_dim])
+                    if self.config.train.goal_normalizer:
+                        state[:, self.config.env.state_dim: ] = self.goal_normalizer(state[:, self.config.env.state_dim: ])
+                    state = torch.from_numpy(state).to(self.device, dtype=torch.float)
+                    action, _, _ = self.actor(state)
                     
-                next_state, reward, terminated, truncated, info = env.step(np.clip(action.cpu().numpy().squeeze(0), 
-                                                                                    env.action_space.low, 
-                                                                                    env.action_space.high))
+                next_state, reward, terminated, truncated, info = env.step(np.clip(action.cpu().numpy(), env.action_space.low, env.action_space.high))
 
-                episodic_reward += reward
-                duration += 1
+                
+                if len(info['terminal_steps']) > 0:
+                    agent_id = info['terminal_steps'].agent_id
+                    _, r, te, tr = info['terminal_state']
+                    print(agent_id, r.shape)
+                    self.episodic_reward[agent_id] += r
+                    self.duration[agent_id] += 1
+        
+                    for idx, d in zip(agent_id, te + tr):
+                        if d:
+                            episodic_rewards.append(self.episodic_reward[idx])
+                            durations.append(self.duration[idx])    
 
-                done = terminated + truncated
-                if done:
-                    break
+                            self.episodic_reward[idx] = 0
+                            self.duration[idx] = 0  
+                           
+                while len(info['decision_steps']) == 0:    
+                    empty_ac = np.empty((0, *env.action_space.shape))   
+                    next_state, reward, terminated, truncated, info = env.step(empty_ac)                        
+                
+                    if len(info['terminal_steps']) > 0:
+                        agent_id =info['terminal_steps'].agent_id
+                        ns, r, te, tr = info['terminal_state']
+                        self.episodic_reward[agent_id] += r
+                        self.duration[agent_id] += 1
+            
+                        for idx, d in zip(agent_id, terminated + truncated):
+                            if d:
+                                episodic_rewards.append(self.episodic_reward[idx])
+                                durations.append(self.duration[idx])    
 
+                                self.episodic_reward[idx] = 0
+                                self.duration[idx] = 0  
+
+                self.episodic_reward += reward
+                self.duration += 1
                 # update state
                 state = next_state
 
-            rewards.append(episodic_reward)
-            durations.append(duration)
-            logger.info(f"Episode {episode}: score - {episodic_reward} duration - {t}")
+            rewards.append(episodic_rewards)
+            durations.append(durations)
+            logger.info(f"Episode {episode}: score - {np.mean(episodic_rewards)} duration - {t}")
 
         avg_reward = np.mean(rewards)
         avg_duration = np.mean(durations)

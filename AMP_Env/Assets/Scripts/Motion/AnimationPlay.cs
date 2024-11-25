@@ -14,11 +14,12 @@ namespace AMP
     {
 
         public Skeleton skeleton;
-        public MotionParser motionParser;
+        public MotionDatabase motionDatabase;
 
         [Header("Animation player property")]
         public List<MotionFrameData> frameData;
         public int currentFrame = 0;
+
 
         public int totalFrame
         {
@@ -35,13 +36,15 @@ namespace AMP
             }
         }
 
-        public void LoadData()
+        public void LoadData(string key)
         {
+            if (string.IsNullOrEmpty(key))
+                return;
             if (skeleton != null)
                 skeleton.CreateSkeleton();
 
             currentFrame = 0;
-            frameData = motionParser.LoadData();
+            frameData = motionDatabase.GetMotionData(key);
 
             PlayAnimation();
         }

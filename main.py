@@ -22,8 +22,6 @@ def parse_args():
                         help="pretrained model prefix(ex/ number of episode, 'best' or 'last') from same experiments")
     parser.add_argument("--experiment_path", type=str, default=None,
                         help="path to pretrained model ")
-    parser.add_argument("--video_path", type=str, default=None,
-                        help="path to saving playing video ")
     parser.add_argument("--not_resume", action='store_true')
     parser.add_argument("--desc", type=str, default="",
                         help="Additional description of the executing code")
@@ -50,7 +48,9 @@ def main():
     if args.load_postfix and args.experiment_path:
         trainer = AMPAgent.load(experiment_path=args.experiment_path, 
                                 postfix=args.load_postfix,
-                                resume=not args.not_resume)
+                                resume=not args.not_resume,
+                                eval=args.eval)
+        config = trainer.config
     else:
         # Get config
         config = get_config(args.config)
@@ -62,11 +62,9 @@ def main():
         trainer.train(envs, args.exp_name)
 
     if args.eval:
-        if args.video_path:
-            env = gym.make(trainer.config.env.env_name, env_config={"render_mode": 'rgb_array'})
-            env = gym.wrappers.RecordVideo(env, args.video_path)
-        else:
-            env = gym.make(trainer.config.env.env_name, env_config={"render_mode": 'human'})
+        env = VertorizedUnityEnv(config.env.env_name, 
+                                 time_scale=1.0, 
+                                 no_graphics=True if config.env.env_name is None else False)
             
         trainer.eval(
             env=env,

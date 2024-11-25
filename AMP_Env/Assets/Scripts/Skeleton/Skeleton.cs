@@ -22,11 +22,11 @@ namespace AMP
             }
         }
 
-        public UnityEngine.Object skeletonFile;
+        public string skeletonFile;
 
         public abstract void CreateSkeleton();
 
-        public abstract void SetAnimationData(MotionFrameData motionFrameData);
+        public abstract void SetAnimationData(MotionFrameData motionFrameData, bool ignoreRootPos = false);
 
         public abstract void RecordPrevState();
 

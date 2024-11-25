@@ -1,6 +1,7 @@
 import os
 import numpy as np
 from torch.utils.data import Dataset
+from torch.utils.data.sampler import Sampler
 import glob
 import tqdm
 import logging
@@ -11,18 +12,34 @@ from .preprocess_deepmimic_data import *
 
 logger = logging.getLogger(__name__)
 
+
 class MotionDataset(Dataset):
-    def __init__(self, motion_files, skeleton_file):
-        self.motion_files = motion_files
+    def __init__(self, dataset_file, skeleton_file):
+        with open(dataset_file, "r") as f:
+            self.motion_files = json.load(f)["Motions"]
+        
         self.data = []
-        self.labels = []
+        self.labels = [] 
+        
+        self.weights = []
 
         skeleton_info = parse_skeleton_file(skeleton_file)
-        for motion_path in motion_files:
+        for d in tqdm.tqdm(self.motion_files, desc="Load motion data"):
+            motion_path = d["File"]
+            weight = d["Weight"]            
+            
             motion = parse_motion_file(motion_path, skeleton_info)
             
             self.data.append(motion)
+            self.weights.extend([weight] * (len(motion) - 1))
+        
+        logger.info(f"Load {len(self.motion_files)} motion files and num of total state is { len(self)}")
+       
             
+    def get_motion_dim(self):
+        assert len(self.data) > 0, "There is no motion data"        
+        return self.data[0].shape[-1]
+    
     def __len__(self):
         l = 0
         for d in self.data:
@@ -33,8 +50,8 @@ class MotionDataset(Dataset):
     def __getitem__(self, idx):
         cur = 0
         while idx >= len(self.data[cur]) - 1 and cur < len(self.data):
-            cur += 1
             idx -= len(self.data[cur]) - 1
+            cur += 1
         
         state = self.data[cur][idx]
         next_state = self.data[cur][idx + 1]

@@ -22,6 +22,11 @@ python -m tools.mocap_player_for_mujoco --asf_file=data/asf/02.asf --amc_file=da
 python main.py --train --config=configs/Humanoid.yaml
 ```
 
+## resume
+```
+python main.py --train --experiment_path=<experiment_path> --load_postfix=<best or timesteps000000>
+```
+
 # Evaluate 
 
 ```

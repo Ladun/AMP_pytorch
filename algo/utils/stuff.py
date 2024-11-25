@@ -47,10 +47,11 @@ class RunningMeanStd:
 
 
 
-class ObservationNormalizer:
-    def __init__(self, num_envs, obs_shape):
+class Normalizer:
+    def __init__(self, num_envs, shape, name):
         self.num_envs = num_envs
-        self.rms = RunningMeanStd(shape=obs_shape)
+        self.rms = RunningMeanStd(shape=shape)
+        self.name = name
 
     def __call__(self, obs, update=True):
         if update:
@@ -58,11 +59,11 @@ class ObservationNormalizer:
         return np.clip((obs - self.rms.mean) / np.sqrt(self.rms.var + 1e-8), -10, 10)
 
     def save(self, base_path):
-        save_path = os.path.join(base_path, "observation_normalizer.pth")
+        save_path = os.path.join(base_path, f"{self.name}_normalizer.pth")
         torch.save(self.rms.save_variables(), save_path)
 
     def load(self, base_path):
-        load_path = os.path.join(base_path, "observation_normalizer.pth")
+        load_path = os.path.join(base_path, f"{self.name}_normalizer.pth")
         self.rms.load_variables(torch.load(load_path))
 
 
