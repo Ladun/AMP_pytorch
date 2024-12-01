@@ -113,7 +113,7 @@ namespace AMP
             {
                 Rect nr = new Rect(motionDataRectPos, new Vector2(contentNameSize, motionDataContentWidth));
                 EditorGUI.DrawRect(nr, new Color(1, 1, 1, 0.2f));
-                GUI.Label(nr, kv.Key, EditorStyles.boldLabel);
+                GUI.Label(nr, kv.Key.ToString(), EditorStyles.boldLabel);
 
                 Rect vr = new Rect(motionDataRectPos + new Vector2(contentNameSize + padding, 0), new Vector2(valueSize, motionDataContentWidth));
                 EditorGUI.DrawRect(vr, new Color(1, 1, 1, 0.17f));

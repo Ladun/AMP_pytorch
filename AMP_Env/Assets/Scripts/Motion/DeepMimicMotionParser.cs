@@ -71,7 +71,7 @@ namespace AMP
                                                    .Select(col => motionData.Frames[i, col])
                                                    .ToList();
 
-                    frameData.JointData[dofs[dofIdx, 0].ToString()] = values;
+                    frameData.JointData[dofs[dofIdx, 0]] = values;
                     frame += dofs[dofIdx, 1];
                     dofIdx++;
                 }

@@ -104,6 +104,7 @@ namespace AMP
             public Vector3 attachTheta;
             public Vector3 limLow;//radian
             public Vector3 limHigh; //radian
+            public float torqueLim;
 
         }
         public class DrawShape
@@ -135,8 +136,15 @@ namespace AMP
 
        
 
-        public void Parse(string skeletonFile)
+        public void Parse(string skeletonFile, bool forced = true)
         {
+            if(!forced)
+            {
+                if (joints.Count > 0)
+                    return;
+            }
+
+
             string path = Path.Combine(Utils.GetCurrentPath(), skeletonFile);
             string text = Utils.ReadTextFile(path);
 
@@ -160,6 +168,7 @@ namespace AMP
                 joint.attachTheta = new Vector3(jointData.AttachThetaX, jointData.AttachThetaY, jointData.AttachThetaZ);
                 joint.limLow = new Vector3(jointData.LimLow0, jointData.LimLow1, jointData.LimLow2); 
                 joint.limHigh = new Vector3(jointData.LimHigh0, jointData.LimHigh1, jointData.LimHigh2);
+                joint.torqueLim = jointData.TorqueLim;
 
                 if (joint.type == "revolute")
                     re += 1;

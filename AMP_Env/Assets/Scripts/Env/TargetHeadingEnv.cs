@@ -4,7 +4,7 @@ using System.Collections.Generic;
 
 public class TargetHeadingEnv : TrainingEnv
 {
-
+    public Direction direction;
     private float targetSpeed = 1;
     private float targetHeading = 0;
 
@@ -12,6 +12,11 @@ public class TargetHeadingEnv : TrainingEnv
     {
         targetSpeed = Random.Range(1f, 5f);
         targetHeading = Random.Range(0, 1f) * Mathf.PI * 2;
+
+        if(direction != null)
+        {
+            direction.SetHeading(targetHeading);
+        }
     }
 
     public override List<float> GetGoals(Skeleton skeleton)
@@ -27,15 +32,15 @@ public class TargetHeadingEnv : TrainingEnv
         return new List<float> { Mathf.Cos(tarHeading), -Mathf.Sin(tarHeading), tarSpeed };
     }
 
-    public override float GetReward(JointDriveController jdController)
+    public override float GetReward(ArticulationBodyController abController)
     {
 
         Vector3 cmv = Vector3.zero;
         float totalMass = 0;
-        foreach(var bp in jdController.bodyPartsList)
+        foreach(var bp in abController.bodyPartsList)
         {
-            cmv += bp.rb.linearVelocity * bp.rb.mass;
-            totalMass += bp.rb.mass;
+            cmv += bp.ab.linearVelocity * bp.ab.mass;
+            totalMass += bp.ab.mass;
         }
         cmv = cmv / totalMass;
         cmv.y = 0;

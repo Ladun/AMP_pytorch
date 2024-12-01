@@ -7,7 +7,7 @@ namespace AMP
 {
     public class MotionFrameData
     {
-        public Dictionary<string, List<float>> JointData = new Dictionary<string, List<float>>();
+        public Dictionary<int, List<float>> JointData = new Dictionary<int, List<float>>();
     }
 
     public class AnimationPlay : MonoBehaviour

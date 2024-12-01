@@ -4,6 +4,7 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using JetBrains.Annotations;
+using UnityEditor;
 
 
 namespace AMP
@@ -24,6 +25,7 @@ namespace AMP
         private DeepMimicParser parser = new DeepMimicParser();
 
         private SortedDictionary<int, Transform> jointTransforms = new SortedDictionary<int, Transform>();
+        
         private Dictionary<int, Transform> bodyTransforms = new Dictionary<int, Transform>();
         private Dictionary<Color, Material> colors = new Dictionary<Color, Material>();
 
@@ -59,7 +61,16 @@ namespace AMP
             {
                 for (int i = 0; i < transform.childCount; i++)
                 {
-                    DestroyImmediate(transform.GetChild(i).gameObject);
+#if UNITY_EDITOR
+                    if (!Application.isPlaying)
+                    {
+                        DestroyImmediate(transform.GetChild(i).gameObject);
+                    }
+                    else
+#endif
+                    {
+                        Destroy(transform.GetChild(i).gameObject);
+                    }
                 }
             }
             numOfDofs = 0;
@@ -94,7 +105,15 @@ namespace AMP
             {
                 DeepMimicParser.Joint joint = entry.Value;
 
-                GameObject jointObj = CreateJointObject(joint, parser.bodys[entry.Key]);
+                GameObject jointObj = new GameObject(joint.name + " (joint)");
+                Transform parent = transform;
+                if (jointTransforms.ContainsKey(joint.parentId))
+                {
+                    parent = jointTransforms[joint.parentId];
+                }
+                jointObj.transform.SetParent(parent);
+                jointObj.transform.localPosition = joint.attachPos * LENGTH_SCALE;
+
                 jointTransforms[joint.id] = jointObj.transform;
 
             }
@@ -123,6 +142,16 @@ namespace AMP
             RecordPrevState();
         }
 
+        public override void AddJoints()
+        {
+            foreach (var entry in parser.joints)
+            {
+                DeepMimicParser.Joint joint = entry.Value;
+
+                CreateJointObject(jointTransforms[joint.id].gameObject, joint, parser.bodys[joint.id]);
+            }
+        }
+
         private GameObject CreateBodyShapeObject(DeepMimicParser.DrawShape body)
         {
             GameObject bodyObj = null;
@@ -130,11 +159,16 @@ namespace AMP
             if(body.shape == "sphere")
             {
                 bodyObj = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                SphereCollider col = bodyObj.GetComponent<SphereCollider>();
+                col.radius *= 0.95f;
             }
             else if(body.shape == "capsule")
             {
                 bodyObj = GameObject.CreatePrimitive(PrimitiveType.Capsule);
                 bodyParam.y -= bodyParam.y * 0.25f;
+                CapsuleCollider col = bodyObj.GetComponent<CapsuleCollider>();
+                col.height = 1.6f;
+                col.radius = 0.45f;
             }
             else if(body.shape == "box")
             {
@@ -160,70 +194,62 @@ namespace AMP
             return bodyObj;
         }
 
-        private GameObject CreateJointObject(DeepMimicParser.Joint joint, DeepMimicParser.BodyShape body)
+        private void CreateJointObject(GameObject jointObj, DeepMimicParser.Joint joint, DeepMimicParser.BodyShape body)
         {
-            GameObject jointObj = new GameObject(joint.name + " (joint)");
+            ArticulationBody ab = jointObj.AddComponent<ArticulationBody>();
+            ab.mass = body.mass;            
 
-            Transform parent = transform;
-            if (jointTransforms.ContainsKey(joint.parentId))
+            if (joint.type == "spherical")
             {
-                parent = jointTransforms[joint.parentId];
+                // https://github.com/xbpeng/DeepMimic/issues/146#issuecomment-807446006
+                ab.jointType = ArticulationJointType.SphericalJoint;
+                ab.swingZLock = ArticulationDofLock.LimitedMotion;
+                ab.swingYLock = ArticulationDofLock.LimitedMotion;
+                ab.twistLock = ArticulationDofLock.LimitedMotion;
+                ab.anchorRotation = Quaternion.Euler(0, 0, 0);
+
+                ArticulationDrive xDrive = ab.xDrive;
+                xDrive.lowerLimit = joint.limLow.x * Mathf.Rad2Deg;
+                xDrive.upperLimit = joint.limHigh.x * Mathf.Rad2Deg;
+                xDrive.forceLimit = joint.torqueLim;
+                ab.xDrive = xDrive;
+
+                ArticulationDrive yDrive = ab.yDrive;
+                yDrive.lowerLimit = joint.limLow.y * Mathf.Rad2Deg;
+                yDrive.upperLimit = joint.limHigh.y * Mathf.Rad2Deg;
+                yDrive.forceLimit = joint.torqueLim;
+                ab.yDrive = yDrive;
+
+                ArticulationDrive zDrive = ab.zDrive;
+                zDrive.lowerLimit = joint.limLow.z * Mathf.Rad2Deg;
+                zDrive.upperLimit = joint.limHigh.z * Mathf.Rad2Deg;
+                zDrive.forceLimit = joint.torqueLim;
+                ab.zDrive = zDrive;
+
+                numOfDofs += 3;
             }
-            jointObj.transform.SetParent(parent);
-            jointObj.transform.localPosition = joint.attachPos * LENGTH_SCALE;
-
-            if (joint.id != 0)
+            else if(joint.type == "revolute")
             {
-                ConfigurableJoint cj = jointObj.AddComponent<ConfigurableJoint>();
-                cj.connectedBody = parent.GetComponent<Rigidbody>();
-                cj.xMotion = ConfigurableJointMotion.Locked;
-                cj.yMotion = ConfigurableJointMotion.Locked;
-                cj.zMotion = ConfigurableJointMotion.Locked;
-                cj.axis = Vector3.forward;
-                cj.rotationDriveMode = RotationDriveMode.Slerp;
+                ab.jointType = ArticulationJointType.RevoluteJoint;
+                ab.twistLock = ArticulationDofLock.LimitedMotion;
+                ab.anchorRotation = Quaternion.Euler(270, 90, 0);
 
-                if (joint.type == "spherical")
-                {
-                    // https://github.com/xbpeng/DeepMimic/issues/146#issuecomment-807446006
-                    cj.angularXMotion = ConfigurableJointMotion.Free;
-                    cj.angularYMotion = ConfigurableJointMotion.Free;
-                    cj.angularZMotion = ConfigurableJointMotion.Free;
-                    numOfDofs += 3;
-                }
-                else if(joint.type == "revolute")
-                {
-                    cj.angularXMotion = ConfigurableJointMotion.Limited;
-                    cj.angularYMotion = ConfigurableJointMotion.Locked;
-                    cj.angularZMotion = ConfigurableJointMotion.Locked;
+                ArticulationDrive xDrive = ab.xDrive;
+                xDrive.forceLimit = joint.torqueLim;
+                ab.xDrive = xDrive;
 
-                    if(joint.limLow.x == 0)
-                    {
-                        cj.axis = -Vector3.forward;
-                    }
+                xDrive.lowerLimit = joint.limLow.x * Mathf.Rad2Deg;
+                xDrive.upperLimit = joint.limHigh.x * Mathf.Rad2Deg;
 
-                    cj.lowAngularXLimit = new SoftJointLimit() { limit = joint.limLow.x * Mathf.Rad2Deg +cj.axis.z * 90};
-                    cj.highAngularXLimit = new SoftJointLimit() { limit = joint.limHigh.x * Mathf.Rad2Deg + cj.axis.z * 90 };
-
-                    numOfDofs += 1;
-                }
-                else
-                {
-                    cj.angularXMotion = ConfigurableJointMotion.Locked;
-                    cj.angularYMotion = ConfigurableJointMotion.Locked;
-                    cj.angularZMotion = ConfigurableJointMotion.Locked;
-                }
+                ab.xDrive = xDrive;
+                numOfDofs += 1;
             }
             else
             {
-                jointObj.AddComponent<Rigidbody>();
+                ab.jointType = ArticulationJointType.FixedJoint;
             }
-
-            var rigid = jointObj.GetComponent<Rigidbody>();
-            rigid.mass = body.mass;
-
-            return jointObj;
-
         }
+
         public override void SetAnimationData(MotionFrameData motionFrameData, bool ignoreRootPos=false)
         {
             RecordPrevState();
@@ -231,7 +257,7 @@ namespace AMP
 
             foreach (var entry in motionFrameData.JointData)
             {
-                int key = int.Parse(entry.Key);
+                int key = entry.Key;
                 List<float> values = entry.Value;
                 Transform joint = jointTransforms[key];
 
@@ -300,6 +326,10 @@ namespace AMP
 
             return joints;
         }
+        public override SortedDictionary<int, Transform> GetJointsDict()
+        {
+            return jointTransforms;
+        }
 
         public override Transform GetBody(int id)
         {
@@ -341,7 +371,7 @@ namespace AMP
                 parentPos[-1] = Vector3.zero;
                 foreach(var kv in curMotionFrameData.JointData)
                 {
-                    int k = int.Parse(kv.Key);
+                    int k = kv.Key;
                     if (k < 0)
                         continue;
 
@@ -358,7 +388,7 @@ namespace AMP
                     int p = k;
                     while (p > 0)
                     {
-                        var values = curMotionFrameData.JointData[p + ""];
+                        var values = curMotionFrameData.JointData[p];
                         rot = GetRotFromMotionData(values) * rot;
                         p = parser.joints[p].parentId;
                     }

@@ -30,13 +30,11 @@ namespace AMP
                 touchingGround = true;
                 if (penalizeGroundContact)
                 {
-                    Debug.Log($"{name} ground contacted, penalize end");
                     agent.SetReward(groundContactPenalty);
                 }
 
                 if (agentDoneOnGroundContact)
                 {
-                    Debug.Log($"{name} ground contacted, episode end");
                     agent.EndEpisode();
                 }
             }

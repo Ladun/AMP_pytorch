@@ -32,7 +32,7 @@ train:
     style_reward_scale: 2.0
     ppo:
         loss_type: clip
-        epochs: 5
+        epochs: 1
         batch_size: 256    
         eps_clip: 0.2
         coef_value_function: 0.5
@@ -47,7 +47,7 @@ train:
         optimizer:
             lr: 1e-5 
             weight_decay: 0.2
-        epochs: 10
+        epochs: 2
         batch_size: 256
         gradient_penalty_weight: 10
     reward_scaler: True

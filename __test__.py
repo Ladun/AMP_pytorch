@@ -7,6 +7,7 @@ import glob
 import os
 import json
 import omegaconf 
+import logging
 
 import torch
 from torch import nn
@@ -24,6 +25,13 @@ from algo.data.preprocess_cmu_data import (
 )
 from algo.data.preprocess_deepmimic_data import get_disc_motion_dim, parse_skeleton_file
 from algo.data.motion_dataset import MotionDataset
+
+
+logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
+                    datefmt='%m/%d/%Y %H:%M:%S',
+                    level=logging.INFO,
+                    handlers=[logging.StreamHandler()])
+
 
 def get_inference_video(frame, total_time, vid_name="render.png"):
     timestep = 1. / frame
@@ -241,19 +249,9 @@ def motion_dataset_test():
     motion_dataset = MotionDataset(config.train.gail.dataset_file, config.train.gail.skeleton_file)
     
     weight_sum = sum(motion_dataset.weights)
-    weights = weight_sum / np.array(motion_dataset.weights)
-    sampler = WeightedRandomSampler(weights, num_samples=len(motion_dataset), replacement=True)
     
     print(len(motion_dataset.weights), weight_sum)
     print(set(motion_dataset.weights))
-    
-    loader = DataLoader(motion_dataset, 
-                        batch_size=config.train.gail.batch_size,
-                        drop_last=True,
-                        sampler=sampler)  
-    
-    for i, (s, ns) in enumerate(loader):
-        print(f"[{i}] {s.shape}, {ns.shape}")
         
 def actor_test_for_onnx():
     set_seed(0)
@@ -292,13 +290,10 @@ def actor_test_for_onnx():
 # actor_test_for_onnx()
 
 
-set_seed(1)
+timer_manager = TimerManager()
 
-parse_skeleton_file = parse_skeleton_file("data/characters/humanoid3d.txt")
-device = get_device("cpu")
-config = get_config("configs/Humanoid_unity.yaml") 
-disc = Discriminator(config, get_disc_motion_dim(parse_skeleton_file) * 2)    
-
-d = torch.rand(4, get_disc_motion_dim(parse_skeleton_file) * 2)
-
-print(disc.compute_gradient_penalty(d))
+with timer_manager.get_timer("Dataset test"):
+    motion_dataset_test();    
+    
+for k, v in timer_manager.timers.items():
+    print(f"\t {k} time: {round(v.clear(), 5)} sec")

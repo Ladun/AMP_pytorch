@@ -3,7 +3,11 @@ using Newtonsoft.Json;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using Unity.Burst;
+using Unity.Collections;
+using Unity.Jobs;
 using UnityEngine;
+
 
 public class MotionDatabase : MonoBehaviour
 {
@@ -13,20 +17,20 @@ public class MotionDatabase : MonoBehaviour
         public float Weight;
         public string File;
     }
+    public class DatasetData
+    {
+        public Motions[] Motions;
+    }
     #endregion
 
     public enum DataType { DeepMimic };
 
     public DataType type;
 
-    public class DatasetData
-    {
-        public Motions[] Motions;
-    }
-
     public MotionParser parser;
     public string datasetFile;
 
+    [SerializeField]
     private Dictionary<string, List<MotionFrameData>> motions = new Dictionary<string, List<MotionFrameData>>();
 
     public bool HasMotion

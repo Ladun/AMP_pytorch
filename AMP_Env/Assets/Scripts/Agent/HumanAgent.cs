@@ -5,7 +5,6 @@ using Unity.MLAgents;
 using Unity.MLAgents.Actuators;
 using Unity.MLAgents.Sensors;
 using AMP;
-using Unity.VisualScripting;
 
 public class HumanAgent : Agent
 {
@@ -15,7 +14,7 @@ public class HumanAgent : Agent
     public MotionDatabase motionDatabase;
 
     private Transform root;
-    private JointDriveController jdController;
+    private ArticulationBodyController abController;
 
     public int[] doneByContactJointIds;
 
@@ -27,15 +26,27 @@ public class HumanAgent : Agent
 
         motionDatabase.LoadDataset(false);
 
+        abController = GetComponent<ArticulationBodyController>();
+
+
+    }
+    public override void OnEpisodeBegin()
+    {
+
         skeleton.CreateSkeleton();
         root = skeleton.GetJoints()[0];
-        jdController = GetComponent<JointDriveController>();
 
-        foreach(var joint in skeleton.GetJoints())
+        var motionData = motionDatabase.GetRandomMotionData();
+        skeleton.SetAnimationData(motionDatabase.GetRandomMotionData(), true);
+        //Random start rotation to help generalize
+        root.rotation = Quaternion.Euler(0, Random.Range(0.0f, 360.0f), 0);
+
+        skeleton.AddJoints();
+        abController.ResetState();
+        foreach (var e in skeleton.GetJointsDict())
         {
-            jdController.SetupBodyPart(joint);
+            abController.SetupBodyPart(e.Key, e.Value);
         }
-
         var joints = skeleton.GetJoints();
         for (int i = 0; i < doneByContactJointIds.Length; i++)
         {
@@ -45,18 +56,6 @@ public class HumanAgent : Agent
             t.penalizeGroundContact = true;
             t.groundContactPenalty = -1;
         }
-    }
-    public override void OnEpisodeBegin()
-    {
-        // Reset all joint
-        foreach (var bodyPart in jdController.bodyPartsList)
-        {
-            bodyPart.Reset(bodyPart);
-        }
-        skeleton.SetAnimationData(motionDatabase.GetRandomMotionData(), true);
-
-        //Random start rotation to help generalize
-        root.rotation = Quaternion.Euler(0, Random.Range(0.0f, 360.0f), 0);
 
         env.BeginEpisode();
     }
@@ -86,25 +85,31 @@ public class HumanAgent : Agent
         var continuousAct = actionBuffers.ContinuousActions;
         var i = -1;
 
-        for(int idx = 1; idx < jdController.bodyPartsList.Count; idx++)
+        for(int idx = 1; idx < abController.bodyPartsList.Count; idx++)
         {
             // Spherical하고 Revoluate 관절 구분하기.
-            var bodyPart = jdController.bodyPartsList[idx];
-            var joint = bodyPart.rb.GetComponent<ConfigurableJoint>();
-            if (joint)
+            var bodyPart = abController.bodyPartsList[idx];
+            var ab = bodyPart.ab;
+            if (ab)
             {
+                if (ab.isRoot)
+                    continue;
+
                 float x = 0, y = 0, z = 0;
-                if (joint.angularXMotion != ConfigurableJointMotion.Locked)
+                if (ab.jointType != ArticulationJointType.FixedJoint)
+                {
                     x = continuousAct[++i];
-                if (joint.angularYMotion != ConfigurableJointMotion.Locked)
-                    y = continuousAct[++i];
-                if (joint.angularZMotion != ConfigurableJointMotion.Locked)
-                    z = continuousAct[++i];
-                bodyPart.SetJointTargetFromRotVector(x, y, z);
+                    if (ab.jointType == ArticulationJointType.SphericalJoint)
+                    {
+                        y = continuousAct[++i];
+                        z = continuousAct[++i];
+                    }
+                    bodyPart.SetJointTargetFromRotVector(x, y, z);
+                }
             }
             else
             {
-                Debug.LogWarning($"Wrong joint: {bodyPart.rb}");
+                Debug.LogWarning($"Wrong joint: {bodyPart.ab}");
             }
         }
     }
@@ -113,7 +118,8 @@ public class HumanAgent : Agent
     {
         skeleton.RecordPrevState();
 
-        AddReward(env.GetReward(jdController));
+        if(abController.bodyPartsList.Count > 0)
+            AddReward(env.GetReward(abController));
     }
 
     #endregion
