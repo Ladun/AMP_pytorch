@@ -59,8 +59,9 @@ class AMPAgent:
         if self.config.train.gail.use:
             # Disriminator dataset
             if not eval:
-                self.motion_dataset = MotionDataset(self.config.train.gail.dataset_file, 
-                                                    self.config.train.gail.skeleton_file)
+                self.motion_dataset = MotionDataset(dataset_file=self.config.train.gail.dataset_file, 
+                                                    skeleton_file=self.config.train.gail.skeleton_file,
+                                                    use_normalize=self.config.train.observation_normalizer)
             self.skeleton_info = parse_skeleton_file(self.config.train.gail.skeleton_file)
             
         # -------- Define models --------
@@ -108,12 +109,12 @@ class AMPAgent:
         # observation scaler: (ob - ob.mean()) / (ob.std())
         if self.config.train.observation_normalizer:
             sp = (config.env.state_dim, ) if isinstance(config.env.state_dim, int) else list(config.env.state_dim)
-            self.obs_normalizer = Normalizer(self.config.env.num_envs, sp, "obs")
+            self.obs_normalizer = Normalizer(sp, "obs")
             
         
         if self.config.train.goal_normalizer:
             sp = (config.env.goal_dim, ) 
-            self.goal_normalizer = Normalizer(self.config.env.num_envs, sp, "goal")
+            self.goal_normalizer = Normalizer(sp, "goal")
         
         
         self.timer_manager  = TimerManager()
@@ -429,9 +430,11 @@ class AMPAgent:
     
     def convert_data_in_disc_form(self, data):
         
+        # shape of observastion from env
+        # [[pos_i, nor_i, tan_i, lin_vel_i, ang_vel_i] for i in range(15)]
         def get_data_by_id(d, id):
             p = 5 * 3 * id
-            return d[:, p: p + 15]
+            return d[:, p: p + 5 * 3]
         
         obs = []
         end_effector_id = self.skeleton_info["end_effector_id"]
@@ -460,8 +463,6 @@ class AMPAgent:
         return obs
     def prepare_data_for_discriminator(self, data):
         
-        # shape of observastion from env
-        # [[pos_i, nor_i, tan_i, lin_vel_i, ang_vel_i] for i in range(15)]
         s, ns = data[:2]        
         s = self.convert_data_in_disc_form(s)
         ns = self.convert_data_in_disc_form(ns)

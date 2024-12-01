@@ -48,8 +48,7 @@ class RunningMeanStd:
 
 
 class Normalizer:
-    def __init__(self, num_envs, shape, name):
-        self.num_envs = num_envs
+    def __init__(self, shape, name):
         self.rms = RunningMeanStd(shape=shape)
         self.name = name
 

@@ -9,36 +9,50 @@ import logging
 from .preprocess_cmu_data import *
 from .preprocess_deepmimic_data import *
 
+from ..utils.stuff import Normalizer
+
+from concurrent.futures import ProcessPoolExecutor, as_completed
+
 
 logger = logging.getLogger(__name__)
 
 
 class MotionDataset(Dataset):
-    def __init__(self, dataset_file, skeleton_file):
+    def __init__(self, dataset_file, skeleton_file, use_normalize):
         with open(dataset_file, "r") as f:
             self.motion_files = json.load(f)["Motions"]
         
         self.data = []
-        self.labels = [] 
-        
+        self.labels = []         
         self.weights = []
-
-        skeleton_info = parse_skeleton_file(skeleton_file)
-        for d in tqdm.tqdm(self.motion_files, desc="Load motion data"):
-            motion_path = d["File"]
-            weight = d["Weight"]            
-            
-            motion = parse_motion_file(motion_path, skeleton_info)
-            
-            self.data.append(motion)
-            self.weights.extend([weight] * (len(motion) - 1))
         
-        logger.info(f"Load {len(self.motion_files)} motion files and num of total state is { len(self)}")
-       
+        skeleton_info = parse_skeleton_file(skeleton_file)
+        
+        self.use_normalize = use_normalize        
+        if self.use_normalize:
+            self.normalizer = Normalizer((get_disc_motion_dim(skeleton_info), ), "expert_obs")
+        
+        with ProcessPoolExecutor(max_workers=os.cpu_count()) as executor:
             
-    def get_motion_dim(self):
-        assert len(self.data) > 0, "There is no motion data"        
-        return self.data[0].shape[-1]
+            futures = {executor.submit(parse_motion_file, d["File"], skeleton_info): d 
+                       for d in self.motion_files}
+            
+            logger.info("Load dataset")
+            for future in tqdm.tqdm(as_completed(futures), total=len(futures), desc="Dataset loading"):
+                d = futures[future]
+                try:
+                    motion = future.result()
+                    if self.use_normalize:
+                        motion = self.normalizer(motion).astype(np.float32)
+                    
+                    self.data.append(motion)
+                    self.weights.extend([d["Weight"]] * (len(motion) - 1))
+                except Exception as e:
+                    logger.info(f" Fail to load dataset from {d['File']}: {e}")
+                    
+        
+        logger.info(f"Finish loading {len(self.motion_files)} motion files and num of total state is { len(self)}")
+       
     
     def __len__(self):
         l = 0

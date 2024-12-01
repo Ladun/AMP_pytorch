@@ -122,22 +122,20 @@ def parse_motion_file(path, skeleton_info) -> np.array:
             # 4. tangent vector
             obs.append(quat_vec_multiply(rot, np.array((0, 0, 1))))  
 
+            # calc current position
+            cur_pos = calc_cur_pos(key, positions, rotations, skeleton_info)
+            positions[key] = cur_pos
             # velocity
             if i == 0:
                 # 5. linear velocity
                 obs.append(np.array((0, 0, 0)))
                 # 6. angular velocity
                 obs.append(np.array((0, 0, 0)))
-                positions[key] = np.array((0, 0,0 ))
             else:
                 prev_joints = all_frames[i - 1]
-                duration = prev_joints[-1]
+                duration = prev_joints[-1] # prev_joints is not list, it is dictionary
                 prev_pos = all_positions[i - 1][key]
                 
-                # calc current position
-                cur_pos = calc_cur_pos(key, positions, rotations, skeleton_info)
-                positions[key] = cur_pos
-            
                 # Calculate velocity
                 # 5. linear velocity
                 obs.append((cur_pos - prev_pos) /  duration)
