@@ -131,7 +131,7 @@ namespace AMP
 
         [HideInInspector] public Dictionary<Transform, BodyPart> bodyPartsDict = new Dictionary<Transform, BodyPart>();
 
-        [HideInInspector] public List<BodyPart> bodyPartsList = new List<BodyPart>();
+        public List<BodyPart> bodyPartsList = new List<BodyPart>();
         const float k_MaxAngularVelocity = 50.0f;
 
         /// <summary>

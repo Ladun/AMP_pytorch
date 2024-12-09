@@ -18,9 +18,12 @@ namespace AMP
 
             DrawDefaultInspector();
 
-            if (c.HasSkeleton)
+            
+            if (c.HasSkeleton())
             {
-                Skeleton.Observastion obs = c.GetObs();
+                EditorGUILayout.Space(10);
+                c.UpdateObs();
+                Skeleton.Observastion obs = c.Obs;
                 EditorGUILayout.LabelField($"State Size: {obs.GetObsSize()} ");
                 EditorGUILayout.LabelField($"Num of joints: {c.NumOfJoints} ");
                 EditorGUILayout.LabelField($"Num of dofs: {c.numOfDofs} ");
@@ -29,6 +32,7 @@ namespace AMP
             if (GUILayout.Button("Generate Skeleton", GUILayout.Width(200)))
             {
                 c.CreateSkeleton();
+                c.ConfigureJoints();
             }
 
         }

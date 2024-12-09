@@ -8,6 +8,9 @@ public class TargetHeadingEnv : TrainingEnv
     private float targetSpeed = 1;
     private float targetHeading = 0;
 
+    public Vector3 center;
+    public Vector3 size;
+
     public override void BeginEpisode()
     {
         targetSpeed = Random.Range(1f, 5f);
@@ -32,21 +35,41 @@ public class TargetHeadingEnv : TrainingEnv
         return new List<float> { Mathf.Cos(tarHeading), -Mathf.Sin(tarHeading), tarSpeed };
     }
 
-    public override float GetReward(ArticulationBodyController abController)
+    public override float GetReward(JointDriveController controller)
     {
 
         Vector3 cmv = Vector3.zero;
         float totalMass = 0;
-        foreach(var bp in abController.bodyPartsList)
+        foreach(var bp in controller.bodyPartsList)
         {
-            cmv += bp.ab.linearVelocity * bp.ab.mass;
-            totalMass += bp.ab.mass;
+            cmv += bp.rb.linearVelocity * bp.rb.mass;
+            totalMass += bp.rb.mass;
         }
         cmv = cmv / totalMass;
         cmv.y = 0;
 
         Vector3 targetDir = new Vector3(Mathf.Cos(targetHeading), 0, -Mathf.Sin(targetHeading));
+        float d = targetSpeed - Vector3.Dot(targetDir, cmv);
 
-        return Mathf.Exp(-0.25f * (targetSpeed - Vector3.Dot(targetDir, cmv)));
+        if(Mathf.Abs(d) > targetSpeed * 2)
+        {
+            // End episode
+        }
+
+        return Mathf.Exp(-0.25f * d);
+    }
+
+    public override bool ValidateEnvironment(Skeleton skeleton)
+    {
+        Bounds b = new Bounds(transform.position + center, size);
+
+        return b.Contains(skeleton.transform.position);
+    }
+
+
+    private void OnDrawGizmosSelected()
+    {
+        Bounds b = new Bounds(transform.position + center, size);
+        Gizmos.DrawWireCube(b.center, b.size);
     }
 }

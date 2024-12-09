@@ -20,22 +20,31 @@ namespace AMP
                 // positions.Count == normals.Count == tangents.Count == ...
                 return positions.Count * 5;
             }
+
+            public void Clear()
+            {
+                positions.Clear();
+                normals.Clear();
+                tangents.Clear();  
+                linearVels.Clear();
+                angularVels.Clear();
+            }
         }
+        protected Observastion observastion = new Observastion();
+        public Observastion Obs => observastion;
 
         public string skeletonFile;
 
         public abstract void CreateSkeleton();
 
-        public abstract void AddJoints();
-        public abstract void SetAnimationData(MotionFrameData motionFrameData, bool ignoreRootPos = false);
+        public abstract void ConfigureJoints();
+        public abstract void SetAnimationData(MotionFrameData motionFrameData, bool ignoreRootPos = false, bool ignoreRootRot = false);
 
-        public abstract void RecordPrevState();
+        public abstract void UpdateObs();
 
-        public abstract Observastion GetObs();
+        public abstract bool HasSkeleton();
 
         public abstract List<Transform> GetJoints();
-        public abstract SortedDictionary<int, Transform> GetJointsDict();
 
-        public abstract Transform GetBody(int id);
     }
 }

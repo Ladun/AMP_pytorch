@@ -36,7 +36,13 @@ public class Direction : MonoBehaviour
     {
         float h = heading * Mathf.Deg2Rad;
         Vector3 dir = new Vector3(Mathf.Cos(h), 0, -Mathf.Sin(h));
-
         Debug.DrawRay(transform.position, dir);
+
+        Vector3 d = transform.rotation * Vector3.right;
+        float characterHeading = Mathf.Atan2(-d.z, d.x);
+        Debug.DrawRay(transform.position, d, Color.blue);
+
+        float tarHeading = h - characterHeading;
+        Debug.DrawRay(transform.position, new Vector3(Mathf.Cos(tarHeading), 0, -Mathf.Sin(tarHeading)), Color.red);
     }
 }

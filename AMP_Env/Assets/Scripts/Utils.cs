@@ -9,6 +9,22 @@ namespace AMP
     public class Utils
     {
 
+        public static Vector3 NormalizeAngle(Vector3 euler)
+        {
+            euler.x = NormalizeAngle(euler.x);
+            euler.y = NormalizeAngle(euler.y);
+            euler.z = NormalizeAngle(euler.z);
+            return euler;
+        }
+        public static float NormalizeAngle(float angle)
+        {
+            angle = angle % 360;
+            if (angle > 180)
+                angle -= 360;
+            else if (angle < -180)
+                angle += 360;
+            return angle;
+        }
         public static string ReadTextFile(Object file)
         {
             if(file == null)

@@ -7,7 +7,7 @@ Material:
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_Name: AgentMat
+  m_Name: Agent_Middle_Mat
   m_Shader: {fileID: 46, guid: 0000000000000000f000000000000000, type: 0}
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
@@ -78,7 +78,7 @@ Material:
     - _UVSec: 0
     - _ZWrite: 1
     m_Colors:
-    - _Color: {r: 1, g: 1, b: 1, a: 1}
+    - _Color: {r: 0.47058824, g: 0.54901963, b: 0.6862745, a: 1}
     - _EmissionColor: {r: 0.4339623, g: 0.05117479, b: 0.05117479, a: 1}
   m_BuildTextureStacks: []
   m_AllowLocking: 1

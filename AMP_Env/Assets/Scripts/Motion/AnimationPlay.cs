@@ -40,8 +40,11 @@ namespace AMP
         {
             if (string.IsNullOrEmpty(key))
                 return;
-            if (skeleton != null)
+            if (skeleton != null && !skeleton.HasSkeleton())
+            {
                 skeleton.CreateSkeleton();
+                skeleton.ConfigureJoints();
+            }
 
             currentFrame = 0;
             frameData = motionDatabase.GetMotionData(key);

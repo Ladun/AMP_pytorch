@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Data;
 using Unity.MLAgents;
 using UnityEngine;
 using UnityEngine.Serialization;
@@ -13,6 +14,9 @@ namespace AMP
         [Header("Body Part Info")]
         public ArticulationBody ab;
 
+        public Vector3 lowerLim;
+        public Vector3 upperLim;
+
         [Header("Ground & Target Contact")]
         [Space(10)]
         public GroundContact groundContact;
@@ -22,20 +26,43 @@ namespace AMP
         [FormerlySerializedAs("thisABController")]
         [HideInInspector] public ArticulationBodyController thisABController;
 
-        public void SetJointTargetFromRotVector(float x, float y, float z)
+        public void SetJointTargetFromRotVector(List<float> f)
         {
-            float theta = Mathf.Sqrt(x * x + y * y + z * z);
-            if (theta != 0)
+            if (ab.jointType == ArticulationJointType.SphericalJoint)
             {
-                x = (x / theta);
-                y = (y / theta);
-                z = (z / theta);
+                float x = f[0];
+                float y = f[1];
+                float z = f[2];
+
+                float theta = Mathf.Sqrt(x * x + y * y + z * z);
+                if (theta != 0)
+                {
+                    x = (x / theta);
+                    y = (y / theta);
+                    z = (z / theta);
+                }
+
+                Quaternion rot = new Quaternion(x * Mathf.Sign(theta / 2),
+                                                y * Mathf.Sign(theta / 2),
+                                                z * Mathf.Sign(theta / 2),
+                                                Mathf.Cos(theta / 2));
+                Vector3 euler = rot.eulerAngles;
+
+                euler.x = Mathf.Clamp(euler.x, ab.xDrive.lowerLimit, ab.xDrive.upperLimit);
+                ab.SetDriveTarget(ArticulationDriveAxis.X, euler.x);
+                euler.y = Mathf.Clamp(euler.y, ab.yDrive.lowerLimit, ab.yDrive.upperLimit);
+                ab.SetDriveTarget(ArticulationDriveAxis.Y, euler.y);
+                euler.z = Mathf.Clamp(euler.z, ab.zDrive.lowerLimit, ab.zDrive.upperLimit);
+                ab.SetDriveTarget(ArticulationDriveAxis.Z, euler.z);
             }
 
-            Quaternion rot = new Quaternion(x * Mathf.Sign(theta / 2),
-                                            y * Mathf.Sign(theta / 2),
-                                            z * Mathf.Sign(theta / 2),
-                                            Mathf.Cos(theta / 2));
+            else if(ab.jointType == ArticulationJointType.RevoluteJoint)
+            {
+                float q = f[0]* Mathf.Rad2Deg;
+                q = Mathf.Clamp(q, ab.xDrive.lowerLimit, ab.xDrive.upperLimit);
+                ab.SetDriveTarget(ArticulationDriveAxis.X, q);
+            }
+
         }
     }
 
@@ -54,7 +81,7 @@ namespace AMP
             ArticulationBody ab = t.GetComponent<ArticulationBody>();
             var bp = new ArticulationBodyPart
             {
-                ab = ab,
+                ab = ab
             };
 
             bp.groundContact = t.GetComponent<GroundContact>();
@@ -68,24 +95,6 @@ namespace AMP
                 bp.groundContact.agent = gameObject.GetComponent<Agent>();
             }
 
-
-            ArticulationDrive xDrive = ab.xDrive;
-            xDrive.stiffness = stiffness;
-            xDrive.damping = damping;
-            ab.xDrive = xDrive;
-
-            if(ab.jointType == ArticulationJointType.SphericalJoint)
-            {
-
-                ArticulationDrive yDrive = ab.xDrive;
-                yDrive.stiffness = stiffness;
-                yDrive.damping = damping;
-                ab.yDrive = yDrive;
-                ArticulationDrive zDrive = ab.xDrive;
-                zDrive.stiffness = stiffness;
-                zDrive.damping = damping;
-                ab.xDrive = zDrive;
-            }
             bp.thisABController = this;
             bodyPartsDict.Add(key, bp);
             bodyPartsList.Add(bp);

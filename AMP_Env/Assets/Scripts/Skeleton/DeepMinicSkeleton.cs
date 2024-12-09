@@ -17,44 +17,37 @@ namespace AMP
             public Quaternion rot;
         }
 
-
-        public float LENGTH_SCALE = 10.0f;
+        public float jointFriction = 10f;
+        public float lengthScale = 1.5f;
         
         public Material baseMat;
 
         private DeepMimicParser parser = new DeepMimicParser();
+        public Transform[] jointTransforms;
 
-        private SortedDictionary<int, Transform> jointTransforms = new SortedDictionary<int, Transform>();
-        
-        private Dictionary<int, Transform> bodyTransforms = new Dictionary<int, Transform>();
-        private Dictionary<Color, Material> colors = new Dictionary<Color, Material>();
-
+        //TODO : Remove
         private Dictionary<int, JointState> prevStates = new Dictionary<int, JointState>();
 
         private MotionFrameData curMotionFrameData = null;
+
 
         public int numOfDofs = 0;
 
         public int NumOfJoints
         {
-            get { return jointTransforms.Count; }
-        }
-
-        public bool HasSkeleton
-        {
-            get
+            get 
             {
-                return jointTransforms.Count > 0;
+                if (jointTransforms == null)
+                    return 0;
+
+                return jointTransforms.Length; 
             }
         }
 
 
-        #region Create and control skeleton
+        #region Create and set skeleton
         public void ResetSkeleton()
         {
-            colors.Clear();
-            jointTransforms.Clear();
-            bodyTransforms.Clear();
             prevStates.Clear();
 
             if (transform.childCount > 0)
@@ -75,56 +68,37 @@ namespace AMP
             }
             numOfDofs = 0;
         }
-        public override void RecordPrevState()
-        {
-            foreach(var entry in jointTransforms)
-            {
-                int key = entry.Key;
-                Transform joint = entry.Value;
-
-                if (prevStates.ContainsKey(key))
-                {
-                    prevStates[key].pos = joint.position;
-                    prevStates[key].rot = joint.rotation;
-                }
-                else
-                {
-                    prevStates[key] = new JointState() { pos = joint.position, rot = joint.rotation };
-                }
-            }
-        }
 
         public override void CreateSkeleton()
         {
             ResetSkeleton();
 
-            parser.Parse(skeletonFile);
+            parser.Parse(skeletonFile, false);
 
             // Set joints
+            jointTransforms = new Transform[parser.joints.Count];
             foreach (var entry in parser.joints)
             {
                 DeepMimicParser.Joint joint = entry.Value;
 
                 GameObject jointObj = new GameObject(joint.name + " (joint)");
                 Transform parent = transform;
-                if (jointTransforms.ContainsKey(joint.parentId))
-                {
+                if(joint.parentId != -1)
                     parent = jointTransforms[joint.parentId];
-                }
                 jointObj.transform.SetParent(parent);
-                jointObj.transform.localPosition = joint.attachPos * LENGTH_SCALE;
+                jointObj.transform.localPosition = joint.attachPos * lengthScale;
 
                 jointTransforms[joint.id] = jointObj.transform;
 
             }
 
             // Draw body shape
+            Dictionary<Color, Material> colors = new Dictionary<Color, Material>();
             foreach (var entry in parser.draws)
             {
                 DeepMimicParser.DrawShape body = entry.Value;
 
                 GameObject obj = CreateBodyShapeObject(body);
-                bodyTransforms[entry.Key] = obj.transform;
 
                 if(!colors.TryGetValue(body.color, out Material targetMat))
                 {
@@ -134,28 +108,25 @@ namespace AMP
                 }
                 obj.GetComponent<MeshRenderer>().material = targetMat;
             }
-            foreach (var entry in bodyTransforms)
-            {
-                //entry.Value.localScale = parser.draws[entry.Key].param * LENGTH_SCALE;
-            }
 
-            RecordPrevState();
+            UpdateObs();
         }
 
-        public override void AddJoints()
+        public override void ConfigureJoints()
         {
             foreach (var entry in parser.joints)
             {
                 DeepMimicParser.Joint joint = entry.Value;
 
-                CreateJointObject(jointTransforms[joint.id].gameObject, joint, parser.bodys[joint.id]);
+                ConfigureJoints(jointTransforms[joint.id].gameObject, joint, parser.bodys[joint.id]);
             }
+
         }
 
         private GameObject CreateBodyShapeObject(DeepMimicParser.DrawShape body)
         {
             GameObject bodyObj = null;
-            Vector3 bodyParam = body.param * LENGTH_SCALE;
+            Vector3 bodyParam = body.param * lengthScale;
             if(body.shape == "sphere")
             {
                 bodyObj = GameObject.CreatePrimitive(PrimitiveType.Sphere);
@@ -187,73 +158,148 @@ namespace AMP
             Transform parent = jointTransforms[body.parentId];
 
             bodyObj.transform.SetParent(parent);
-            bodyObj.transform.localPosition = body.attachPos * LENGTH_SCALE;
+            bodyObj.transform.localPosition = body.attachPos * lengthScale;
             bodyObj.transform.localRotation = Quaternion.Euler(body.attachTheta * Mathf.Rad2Deg);
             bodyObj.transform.localScale = bodyParam;
 
             return bodyObj;
         }
 
-        private void CreateJointObject(GameObject jointObj, DeepMimicParser.Joint joint, DeepMimicParser.BodyShape body)
+        private void ConfigureJoints(GameObject jointObj, DeepMimicParser.Joint joint, DeepMimicParser.BodyShape body)
         {
-            ArticulationBody ab = jointObj.AddComponent<ArticulationBody>();
-            ab.mass = body.mass;            
+            Transform parent = transform;
+            if (joint.parentId != -1)
+                parent = jointTransforms[joint.parentId];
 
-            if (joint.type == "spherical")
+            jointObj.transform.SetParent(parent);
+            jointObj.transform.localPosition = joint.attachPos * lengthScale;
+
+            if (joint.id != 0)
             {
-                // https://github.com/xbpeng/DeepMimic/issues/146#issuecomment-807446006
-                ab.jointType = ArticulationJointType.SphericalJoint;
-                ab.swingZLock = ArticulationDofLock.LimitedMotion;
-                ab.swingYLock = ArticulationDofLock.LimitedMotion;
-                ab.twistLock = ArticulationDofLock.LimitedMotion;
-                ab.anchorRotation = Quaternion.Euler(0, 0, 0);
+                ConfigurableJoint cj = jointObj.AddComponent<ConfigurableJoint>();
+                cj.connectedBody = parent.GetComponent<Rigidbody>();
+                cj.xMotion = ConfigurableJointMotion.Locked;
+                cj.yMotion = ConfigurableJointMotion.Locked;
+                cj.zMotion = ConfigurableJointMotion.Locked;
+                cj.axis = Vector3.forward;
+                cj.rotationDriveMode = RotationDriveMode.Slerp;
 
-                ArticulationDrive xDrive = ab.xDrive;
-                xDrive.lowerLimit = joint.limLow.x * Mathf.Rad2Deg;
-                xDrive.upperLimit = joint.limHigh.x * Mathf.Rad2Deg;
-                xDrive.forceLimit = joint.torqueLim;
-                ab.xDrive = xDrive;
+                if (joint.type == "spherical")
+                {
+                    // https://github.com/xbpeng/DeepMimic/issues/146#issuecomment-807446006
+                    cj.angularXMotion = ConfigurableJointMotion.Limited;
+                    cj.angularYMotion = ConfigurableJointMotion.Limited;
+                    cj.angularZMotion = ConfigurableJointMotion.Limited;
 
-                ArticulationDrive yDrive = ab.yDrive;
-                yDrive.lowerLimit = joint.limLow.y * Mathf.Rad2Deg;
-                yDrive.upperLimit = joint.limHigh.y * Mathf.Rad2Deg;
-                yDrive.forceLimit = joint.torqueLim;
-                ab.yDrive = yDrive;
 
-                ArticulationDrive zDrive = ab.zDrive;
-                zDrive.lowerLimit = joint.limLow.z * Mathf.Rad2Deg;
-                zDrive.upperLimit = joint.limHigh.z * Mathf.Rad2Deg;
-                zDrive.forceLimit = joint.torqueLim;
-                ab.zDrive = zDrive;
+                    cj.lowAngularXLimit = new SoftJointLimit() { limit = joint.limLow.x * Mathf.Rad2Deg };
+                    cj.highAngularXLimit = new SoftJointLimit() { limit = joint.limHigh.x * Mathf.Rad2Deg  };
 
-                numOfDofs += 3;
-            }
-            else if(joint.type == "revolute")
-            {
-                ab.jointType = ArticulationJointType.RevoluteJoint;
-                ab.twistLock = ArticulationDofLock.LimitedMotion;
-                ab.anchorRotation = Quaternion.Euler(270, 90, 0);
 
-                ArticulationDrive xDrive = ab.xDrive;
-                xDrive.forceLimit = joint.torqueLim;
-                ab.xDrive = xDrive;
+                    numOfDofs += 3;
+                }
+                else if (joint.type == "revolute")
+                {
+                    cj.angularXMotion = ConfigurableJointMotion.Limited;
+                    cj.angularYMotion = ConfigurableJointMotion.Locked;
+                    cj.angularZMotion = ConfigurableJointMotion.Locked;
 
-                xDrive.lowerLimit = joint.limLow.x * Mathf.Rad2Deg;
-                xDrive.upperLimit = joint.limHigh.x * Mathf.Rad2Deg;
+                    if (joint.limLow.x == 0)
+                    {
+                        cj.axis = -Vector3.forward;
+                    }
 
-                ab.xDrive = xDrive;
-                numOfDofs += 1;
+                    cj.lowAngularXLimit = new SoftJointLimit() { limit = joint.limLow.x * Mathf.Rad2Deg};
+                    cj.highAngularXLimit = new SoftJointLimit() { limit = joint.limHigh.x * Mathf.Rad2Deg };
+
+                    numOfDofs += 1;
+                }
+                else
+                {
+                    cj.angularXMotion = ConfigurableJointMotion.Locked;
+                    cj.angularYMotion = ConfigurableJointMotion.Locked;
+                    cj.angularZMotion = ConfigurableJointMotion.Locked;
+                }
             }
             else
             {
-                ab.jointType = ArticulationJointType.FixedJoint;
+                jointObj.AddComponent<Rigidbody>();
             }
+
+            var rigid = jointObj.GetComponent<Rigidbody>();
+            rigid.mass = body.mass;
         }
 
-        public override void SetAnimationData(MotionFrameData motionFrameData, bool ignoreRootPos=false)
+        //private void ConfigureJoints(GameObject jointObj, DeepMimicParser.Joint joint, DeepMimicParser.BodyShape body)
+        //{
+        //    ArticulationBody ab = jointObj.GetComponent<ArticulationBody>();
+        //    if (ab == null)
+        //        ab = jointObj.AddComponent<ArticulationBody>();
+        //    ab.mass = body.mass;
+        //    ab.jointFriction = jointFriction;
+
+        //    Vector3 euler = Utils.NormalizeAngle(jointObj.transform.localEulerAngles);
+
+        //    if (joint.type == "spherical")
+        //    {
+        //        // https://github.com/xbpeng/DeepMimic/issues/146#issuecomment-807446006
+        //        ab.anchorRotation = Quaternion.Euler(0, 0, 0);
+
+        //        ArticulationDrive xDrive = ab.xDrive;
+        //        xDrive.driveType = ArticulationDriveType.Target;
+        //        xDrive.lowerLimit = joint.limLow.x * Mathf.Rad2Deg - euler.x;
+        //        xDrive.upperLimit = joint.limHigh.x * Mathf.Rad2Deg - euler.x;
+        //        xDrive.forceLimit = joint.torqueLim ;
+        //        ab.xDrive = xDrive;
+
+        //        ArticulationDrive yDrive = ab.yDrive;
+        //        yDrive.driveType = ArticulationDriveType.Target;
+        //        yDrive.lowerLimit = joint.limLow.y * Mathf.Rad2Deg - euler.y;
+        //        yDrive.upperLimit = joint.limHigh.y * Mathf.Rad2Deg - euler.y;
+        //        yDrive.forceLimit = joint.torqueLim;
+        //        ab.yDrive = yDrive;
+
+        //        ArticulationDrive zDrive = ab.zDrive;
+        //        zDrive.driveType = ArticulationDriveType.Target;
+        //        zDrive.lowerLimit = joint.limLow.z * Mathf.Rad2Deg - euler.z;
+        //        zDrive.upperLimit = joint.limHigh.z * Mathf.Rad2Deg - euler.z;
+        //        zDrive.forceLimit = joint.torqueLim ;
+        //        ab.zDrive = zDrive;
+
+        //        ab.jointType = ArticulationJointType.SphericalJoint;
+        //        ab.swingZLock = ArticulationDofLock.LimitedMotion;
+        //        ab.swingYLock = ArticulationDofLock.LimitedMotion;
+        //        ab.twistLock = ArticulationDofLock.LimitedMotion;
+
+        //        numOfDofs += 3;
+        //    }
+        //    else if(joint.type == "revolute")
+        //    {
+        //        ab.jointType = ArticulationJointType.RevoluteJoint;
+        //        ab.twistLock = ArticulationDofLock.LimitedMotion;
+        //        ab.anchorRotation = Quaternion.Euler(0, 270, 0);
+
+        //        ArticulationDrive xDrive = ab.xDrive;
+        //        xDrive.driveType = ArticulationDriveType.Target;
+        //        xDrive.lowerLimit = joint.limLow.x * Mathf.Rad2Deg - euler.z;
+        //        xDrive.upperLimit = joint.limHigh.x * Mathf.Rad2Deg - euler.z;
+        //        xDrive.forceLimit = joint.torqueLim;
+        //        ab.xDrive = xDrive;
+
+        //        numOfDofs += 1;
+        //    }
+        //    else
+        //    {
+        //        ab.jointType = ArticulationJointType.FixedJoint;
+        //    }
+        //}
+
+
+        public override void SetAnimationData(MotionFrameData motionFrameData, bool ignoreRootPos=false, bool ignoreRootRot=false)
         {
-            RecordPrevState();
             curMotionFrameData = motionFrameData;
+
+            parser.Parse(skeletonFile, false);
 
             foreach (var entry in motionFrameData.JointData)
             {
@@ -261,81 +307,97 @@ namespace AMP
                 List<float> values = entry.Value;
                 Transform joint = jointTransforms[key];
 
-                if(values.Count == 4)
+                Vector3 euler = Vector3.zero;
+                if (values.Count == 4)
                 {
                     joint.localRotation = new Quaternion(values[1], values[2], values[3], values[0]);
+                    euler = joint.localRotation.eulerAngles;
                 }
                 else if(values.Count == 1)
                 {
                     joint.localRotation = Quaternion.Euler(0, 0, values[0] * Mathf.Rad2Deg);
+                    euler.x = values[0] * Mathf.Rad2Deg;
                 }
                 else
                 {
                     if(!ignoreRootPos)
-                        joint.localPosition = new Vector3(values[0], values[1], values[2]) * LENGTH_SCALE;
-                    joint.localRotation = new Quaternion(values[4], values[5], values[6], values[3]);
+                        joint.localPosition = new Vector3(values[0], values[1], values[2]) * lengthScale;
+                    if(!ignoreRootRot)
+                        joint.localRotation = new Quaternion(values[4], values[5], values[6], values[3]);
                 }
+
             }
-            GetObs();
         }
+        #endregion
 
+        #region Record physics states
 
-        public override Observastion GetObs()
+        public override void UpdateObs()
         {
-            Observastion obs = new Observastion();
+            observastion.Clear();
 
             Transform root = jointTransforms[0];
 
-            foreach (var entry in jointTransforms)
+            for (int key = 0; key < jointTransforms.Length; key++)
             {
-                int key = entry.Key;
-                Transform joint = entry.Value;
-                JointState prevState = prevStates[key];
+                Transform joint = jointTransforms[key];
 
-                obs.positions.Add(root.InverseTransformPoint(joint.position));
+                observastion.positions.Add(root.InverseTransformPoint(joint.position));
 
-                obs.normals.Add(joint.right);
-                obs.tangents.Add(Vector3.Cross(joint.right, Vector3.up));
+                observastion.normals.Add(joint.right);
+                observastion.tangents.Add(joint.forward);
 
-                // Calc linear velocity
-                Vector3 linearVel = (joint.position - prevState.pos) / Time.deltaTime;
-                obs.linearVels.Add(linearVel);
 
-                // Calc angular velocity
-                Quaternion deltaRot = joint.rotation * Quaternion.Inverse(prevState.rot);
+                //ArticulationBody ab = joint.GetComponent<ArticulationBody>();
+                Rigidbody ab =joint.GetComponent<Rigidbody>();
 
-                float angle;
-                Vector3 axis;
-                deltaRot.ToAngleAxis(out angle, out axis);
+                if (ab)
+                {
+                    // Calc linear velocity
+                    observastion.linearVels.Add(ab.linearVelocity);
 
-                Vector3 angularVel = axis * angle * Mathf.Deg2Rad / Time.deltaTime;
-                obs.angularVels.Add(angularVel);
+                    // Calc angular velocity
+                    observastion.angularVels.Add(ab.angularVelocity);
+                }
+                else
+                {
+                    // Calc linear velocity
+                    observastion.linearVels.Add(Vector3.zero);
+
+                    // Calc angular velocity
+                    observastion.angularVels.Add(Vector3.zero);
+                }
+                //else
+                //{
+                //    // Calc linear velocity
+                //    Vector3 linearVel = (joint.position - prevState.pos) / Time.fixedDeltaTime;
+                //    //observastion.linearVels.Add(linearVel);
+
+                //    // Calc angular velocity
+                //    Quaternion deltaRot = joint.rotation * Quaternion.Inverse(prevState.rot);
+
+                //    float angle;
+                //    Vector3 axis;
+                //    deltaRot.ToAngleAxis(out angle, out axis);
+
+                //    Vector3 angularVel = axis * angle * Mathf.Deg2Rad / Time.fixedDeltaTime;
+                //    //observastion.angularVels.Add(angularVel);
+                //    if (ab)
+                //        Debug.Log($"[{ab.name}] {ab.linearVelocity}, {linearVel} || {ab.angularVelocity}, {angularVel}");
+                //}
             }
-
-            return obs;
-        }
-
-        public override List<Transform> GetJoints()
-        {
-            List<Transform> joints = new List<Transform> ();
-
-            foreach(var joint in jointTransforms)
-            {
-                joints.Add(joint.Value);
-            }
-
-            return joints;
-        }
-        public override SortedDictionary<int, Transform> GetJointsDict()
-        {
-            return jointTransforms;
-        }
-
-        public override Transform GetBody(int id)
-        {
-            return bodyTransforms[id];
         }
         #endregion
+
+        #region Getter and Setter
+        public override bool HasSkeleton()
+        {
+            return jointTransforms != null && jointTransforms.Length > 0;
+        }
+        public override List<Transform> GetJoints()
+        {
+            return jointTransforms.ToList();
+        }
 
 
         private Quaternion GetRotFromMotionData(List<float> values)
@@ -353,10 +415,17 @@ namespace AMP
                 return new Quaternion(values[4], values[5], values[6], values[3]);
             }
         }
+        #endregion
+
+#if UNITY_EDITOR
 
         private void OnDrawGizmosSelected()
         {
-            if(jointTransforms.ContainsKey(0))
+            if (!HasSkeleton())
+                return;
+
+            parser.Parse(skeletonFile, false);
+            if ( jointTransforms[0] != null)
             {
                 Transform root = jointTransforms[0];
                 Vector3 d = root.rotation * Vector3.right;
@@ -421,32 +490,37 @@ namespace AMP
             }
             else
             {
-
-                foreach (var kv in jointTransforms)
+                if (jointTransforms[0] != null)
                 {
-                    Transform joint = kv.Value;
-                    Vector3 normal = joint.right;
-                    Vector3 tangent = joint.forward;
-
-                    Debug.DrawLine(joint.position, joint.position + normal, Color.green);
-
-
-                    Quaternion rot = Quaternion.identity;
-                    int p = kv.Key;
-                    while (p != -1)
+                    Transform root = jointTransforms[0];
+                    for (int key = 0; key < jointTransforms.Length; key++)
                     {
-                        rot = jointTransforms[p].localRotation * rot;
-                        p = parser.joints[p].parentId;
+                        Transform joint = jointTransforms[key];
+                        Vector3 normal = joint.right;
+                        Vector3 tangent = joint.forward;
+
+                        Debug.DrawLine(joint.position, joint.position + normal, Color.green);
+
+
+                        Quaternion rot = Quaternion.identity;
+                        int p = key;
+                        while (p != -1)
+                        {
+
+                            rot = jointTransforms[p].localRotation * rot;
+                            p = parser.joints[p].parentId;
+                        }
+
+                        normal = rot * Vector3.right;
+                        tangent = rot * Vector3.forward;
+
+                        Debug.DrawLine(joint.position, joint.position + normal * 2 / 3f, Color.red);
                     }
-
-                    normal = rot * Vector3.right;
-                    tangent = rot * Vector3.forward;
-
-                    Debug.DrawLine(joint.position, joint.position + normal * 2/ 3f, Color.red);
                 }
             }
 
         }
+#endif
     }
 
 }
