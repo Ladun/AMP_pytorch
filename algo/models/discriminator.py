@@ -19,7 +19,7 @@ class Discriminator(nn.Module):
         self.m.append(nn.Linear(in_dim, 1))        
         self.m = nn.Sequential(*self.m)  
         
-        self.apply(lambda m: init_orthogonal_weights(m, config.actor.init_scaling))   
+        self.apply(lambda m: init_xavier_uniform(m, config.train.gail.init_scaling))   
 
 
     def forward(self, concated_state):

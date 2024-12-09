@@ -24,7 +24,7 @@ class Critic(nn.Module):
         self.m.append(nn.Linear(in_dim, 1))        
         self.m = nn.Sequential(*self.m)       
 
-        self.apply(lambda m: init_orthogonal_weights(m, config.critic.init_scaling))
+        self.apply(lambda m: init_xavier_uniform(m, config.critic.init_scaling))
         
     def forward(self, state):
         return self.m(state)
@@ -41,10 +41,14 @@ class Actor(nn.Module):
 
         # if action space is defined as continuous, make variance
         self.action_dim = config.env.action_dim
+        
         self.action_std = config.actor.action_std_init
-        self.action_var = torch.full((self.action_dim, ), config.actor.action_std_init ** 2).to(self.device)
-        # learnable std
-        # self.actor_logstd = nn.Parameter(torch.log(torch.ones(1, config.env.action_dim) * config.network.action_std_init))
+        if "min_action_std" in config.actor:
+            self.learnable_std = False
+        else:
+            # learnable std
+            self.learnable_std = True
+            self.actor_logstd = nn.Parameter(torch.log(torch.ones(1, config.env.action_dim) * config.actor.action_std_init))
 
         activation_func = nn.ReLU
         in_dim = self.state_dim + self.goal_dim
@@ -56,7 +60,7 @@ class Actor(nn.Module):
         self.m.append(nn.Linear(in_dim, self.action_dim))        
         self.m = nn.Sequential(*self.m)    
         
-        self.apply(lambda m: init_orthogonal_weights(m, config.actor.init_scaling))
+        self.apply(lambda m: init_xavier_uniform(m, config.actor.init_scaling) )
 
 
     def action_decay(self, action_std_decay_rate, min_action_std):
@@ -66,30 +70,20 @@ class Actor(nn.Module):
         if (self.action_std <= min_action_std):
             self.action_std = min_action_std
 
-        self.action_var = torch.full((self.action_dim, ), self.action_std ** 2).to(self.device)
-
     def set_action_std(self, action_std):
         self.action_std = action_std
-        self.action_var = torch.full((self.action_dim, ), self.action_std ** 2).to(self.device)
 
     def forward(self, state, action=None):
 
         # continuous space action 
         action_mean = self.m(state)
-
-        #action_var = self.action_var.expand_as(action_mean)
-        #cov_mat = torch.diag_embed(action_var).to(self.device)
-        #cov_mat = action_var.unsqueeze(1) * torch.eye(action_var.size()[-1]).to(self.device)        
-        #dist = MultivariateNormal(action_mean, cov_mat)
         
-        
-        dist = Normal(action_mean, self.action_var)
-        
-        # for learnable std
-        # action_logstd = self.actor_logstd.expand_as(action_mean)
-        # action_std = torch.exp(action_logstd)
-        # cov_mat = torch.diag_embed(action_std)
-        # dist = MultivariateNormal(action_mean, cov_mat)
+        if not self.learnable_std:
+            dist = Normal(action_mean, self.action_std)
+        else:
+            action_logstd = self.actor_logstd.expand_as(action_mean)
+            action_std = torch.exp(action_logstd)
+            dist = Normal(action_mean, action_std)
 
         # Get (action, action's log probs, estimated Value)
         if action is None:

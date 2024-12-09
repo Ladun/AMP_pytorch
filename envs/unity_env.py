@@ -67,7 +67,11 @@ class VertorizedUnityEnv(gym.Env):
                  env_filename, worker_id=0,
                  flatten_branched = False,
                  action_space_seed = None,
-                 no_graphics=False, width=80, height=80, 
+                 no_graphics=False, 
+                 width=80, 
+                 height=80, 
+                 target_frame_rate=-1,
+                 capture_frame_rate=60,
                  time_scale=20.0):
         base_port = 5005
         if env_filename is None:
@@ -79,7 +83,9 @@ class VertorizedUnityEnv(gym.Env):
         self._env = UnityEnvironment(env_filename, worker_id, base_port, no_graphics=no_graphics, side_channels=[channel])
         if not no_graphics:
             channel.set_configuration_parameters(width=width, height=height)
-        channel.set_configuration_parameters(time_scale=time_scale)
+        channel.set_configuration_parameters(time_scale=time_scale, 
+                                             target_frame_rate=target_frame_rate,
+                                             capture_frame_rate=capture_frame_rate)
                 
         if not self._env.behavior_specs:
             self._env.step()
@@ -123,7 +129,7 @@ class VertorizedUnityEnv(gym.Env):
                 )
 
             self.action_size = self.group_spec.action_spec.continuous_size
-            high = np.array([1] * self.group_spec.action_spec.continuous_size)
+            high = np.array([np.pi] * self.group_spec.action_spec.continuous_size)
             self.action_space = spaces.Box(-high, high, dtype=np.float32)
         else:
             raise UnityGymException(

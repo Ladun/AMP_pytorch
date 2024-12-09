@@ -1,0 +1,56 @@
+device: "cuda"
+seed: 77
+env:
+    env_name: null
+    num_envs: 10
+    state_dim: 243
+    goal_dim: 0
+    action_dim: 39
+checkpoint_path: "checkpoints/Walker"
+actor:
+    action_std_init: 0.2
+    hidden_dim: [1024, 512]
+    init_scaling: 1
+    optimizer:
+        lr: 0.0001
+        weight_decay: 0
+critic:
+    hidden_dim: [1024, 512]
+    init_scaling: 1
+    optimizer:
+        lr: 0.0003
+        weight_decay: 0
+train: 
+    total_timesteps: 20000000
+    max_episode_len: 1000
+    buffer_size: 20480
+    gamma: 0.995
+    tau: 0.95
+    ppo:
+        loss_type: clip
+        epochs: 5
+        batch_size: 2048    
+        eps_clip: 0.15
+        coef_value_function: 0.5
+        coef_entropy_penalty: 0.001
+        value_clipping: False
+    gail:
+        task_reward_lerp: 0.5
+        style_reward_scale: 2.0
+        use: False
+        data_dir: ["data/run", "data/jump"]
+        asf_dir: "data/asf"
+        hidden_dim: [1024, 512]
+        init_scaling: 1
+        optimizer:
+            lr: 1e-5 
+            weight_decay: 0.2
+        epochs: 10
+        batch_size: 512
+        gradient_penalty_weight: 10
+    reward_scaler: True
+    observation_normalizer: True
+    goal_normalizer: False
+    clipping_gradient: True
+    scheduler: True
+    max_ckpt_count: 3

@@ -12,6 +12,12 @@ def init_orthogonal_weights(m, gain=1):
     if isinstance(m, nn.Linear):
         orthogonal_init(m.weight)
         nn.init.constant_(m.bias, gain)
+        
+def init_xavier_uniform(m, gain=1):
+    if isinstance(m, nn.Linear):
+        nn.init.xavier_uniform_(m.weight, gain=gain)
+        nn.init.constant_(m.bias, 0)
+    
 
 def orthogonal_init(tensor, gain=1):
     '''

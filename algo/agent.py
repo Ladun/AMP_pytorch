@@ -122,7 +122,7 @@ class AMPAgent:
         self.memory         = None
         self.timesteps      = 0
         
-        self.w_g = self.config.train.task_reward_lerp
+        self.w_g = self.config.train.gail.task_reward_lerp
         self.w_s = (1 - self.w_g)
         
         self.episodic_reward = None
@@ -200,7 +200,8 @@ class AMPAgent:
     def load(cls, experiment_path, postfix, resume=True, eval=False):
 
         config = get_config(os.path.join(experiment_path, "config.yaml"))
-        config.actor.action_std_init = config.actor.min_action_std
+        if "min_action_std" in config.actor:
+            config.actor.action_std_init = config.actor.min_action_std
         amp_algo = AMPAgent(config, eval)
         
         # Create a variable to indicate which path the model will be read from
@@ -461,6 +462,7 @@ class AMPAgent:
         
         obs = torch.concat(obs, dim=1)
         return obs
+    
     def prepare_data_for_discriminator(self, data):
         
         s, ns = data[:2]        
@@ -502,12 +504,14 @@ class AMPAgent:
         # ------------- Update other parameters
         
         # action std decaying
-        while self.timesteps > self.next_action_std_decay_step:
-            self.next_action_std_decay_step += self.config.actor.action_std_decay_freq
-            self.actor.action_decay(
-                self.config.actor.action_std_decay_rate,
-                self.config.actor.min_action_std
-            )
+        
+        if not self.actor.learnable_std:
+            while self.timesteps > self.next_action_std_decay_step:
+                self.next_action_std_decay_step += self.config.actor.action_std_decay_freq
+                self.actor.action_decay(
+                    self.config.actor.action_std_decay_rate,
+                    self.config.actor.min_action_std
+                )
             
         # scheduling learning rate
         if self.config.train.scheduler:
@@ -534,7 +538,7 @@ class AMPAgent:
                 d_next_state = self.convert_data_in_disc_form(torch.from_numpy(next_state).to(self.device, dtype=torch.float))
                 s_reward = self.disc.get_reward(d_state, d_next_state)
                 s_reward = s_reward.squeeze(1).cpu().numpy()    
-                s_reward = s_reward * self.config.train.style_reward_scale   
+                s_reward = s_reward * self.config.train.gail.style_reward_scale   
             self.style_reward[agent_id] += s_reward
             
             total_reward = self.w_g * reward + self.w_s * s_reward
@@ -573,7 +577,7 @@ class AMPAgent:
         style_rewards = []
         durations = []
         
-        for _ in range(0, self.config.train.max_episode_len):                        
+        while len(self.memory) < self.config.train.buffer_size:                        
             # ------------- Collect Trajectories -------------
             '''
             Actor-Critic symbol's information
@@ -604,7 +608,7 @@ class AMPAgent:
                 agent_id =info['terminal_steps'].agent_id
                 ns, r, te, tr = info['terminal_state']
                 
-                e, s, d = self.add_to_buffer(agent_id=info['terminal_steps'].agent_id,
+                e, s, d = self.add_to_buffer(agent_id=agent_id,
                                              state=state[agent_id],
                                              next_state=ns,
                                              action=action[agent_id],
@@ -624,14 +628,14 @@ class AMPAgent:
                     agent_id = info['terminal_steps'].agent_id
                     ns, r, te, tr = info['terminal_state']
                 
-                    e, s, d = self.add_to_buffer(agent_id=info['terminal_steps'].agent_id,
-                                                state=state[agent_id],
-                                                next_state=ns,
-                                                action=action[agent_id],
-                                                reward=r,
-                                                value=values[agent_id],
-                                                logprob=logprobs[agent_id],
-                                                done=te + tr)
+                    e, s, d = self.add_to_buffer(agent_id=agent_id,
+                                                 state=state[agent_id],
+                                                 next_state=ns,
+                                                 action=action[agent_id],
+                                                 reward=r,
+                                                 value=values[agent_id],
+                                                 logprob=logprobs[agent_id],
+                                                 done=te + tr)
                     episodic_rewards.extend(e)
                     style_rewards.extend(s)
                     durations.extend(d)
@@ -641,13 +645,13 @@ class AMPAgent:
             
             # add experience to the memory   
             e, s, d = self.add_to_buffer(agent_id=info['decision_steps'].agent_id,
-                               state=state,
-                               next_state=next_state,
-                               action=action,
-                               reward=reward,
-                               value=values,
-                               logprob=logprobs,
-                               done=terminated + truncated)  
+                                         state=state,
+                                         next_state=next_state,
+                                         action=action,
+                                         reward=reward,
+                                         value=values,
+                                         logprob=logprobs,
+                                         done=terminated + truncated)  
             episodic_rewards.extend(e)
             style_rewards.extend(s)
             durations.extend(d)
@@ -721,7 +725,8 @@ class AMPAgent:
         '''
         next_state, _  = envs.reset() #envs.reset(seed=self.config.seed)
         done = np.zeros(self.config.env.num_envs)
-        self.next_action_std_decay_step = self.config.actor.action_std_decay_freq        
+        if not self.actor.learnable_std:
+            self.next_action_std_decay_step = self.config.actor.action_std_decay_freq        
         
         print(f"================ Start training ================")
         print(f"========= Exp name: {self.config.experiment_name} ==========")
@@ -759,7 +764,9 @@ class AMPAgent:
             std_score       = np.round(np.std(step_metrics['train/score']), 4)
             avg_duration    = np.round(np.mean(step_metrics['train/duration']), 4)
             
-            logger.info(f"[{datetime.now().replace(microsecond=0) - start_time}] {self.timesteps}/{self.config.train.total_timesteps} - score: {avg_score} +-{std_score} \t duration: {avg_duration}")
+            logger.info(f"[{datetime.now().replace(microsecond=0) - start_time}] {self.timesteps}/{self.config.train.total_timesteps} "
+                        f"- \033[91mscore: {avg_score} +-{std_score}\033[0m "
+                        f"\t \033[94mduration: {avg_duration}\033[0m")
             for k, v in self.timer_manager.timers.items():
                 logger.info(f"\t {k} time: {round(v.clear(), 5)} sec")
             logger.info(f"\t Estimated training time remaining: {remaining_training_time_min} min {remaining_training_time_sec} sec")

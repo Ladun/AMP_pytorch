@@ -92,7 +92,10 @@ class UnityReplayBuffer:
         self.temp_memory = [{k: [] for k, v in self.temp_memory[i].items()} for i in  range(self.num_of_agents)]
 
     def __len__(self):
-        return len(self.temp_memory['state']) * self.temp_memory['state'][0].shape[0]
+        l = 0
+        for traj in self.temp_memory:
+            l += len(traj['state'])
+        return l
     
 
 class ReplayBuffer:
