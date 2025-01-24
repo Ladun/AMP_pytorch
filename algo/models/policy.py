@@ -57,7 +57,7 @@ class Actor(nn.Module):
             self.m.append(nn.Linear(in_dim, hidden))
             self.m.append(activation_func())
             in_dim = hidden
-        self.m.append(nn.Linear(in_dim, self.action_dim))        
+        self.m.append(nn.Linear(in_dim, self.action_dim))    
         self.m = nn.Sequential(*self.m)    
         
         self.apply(lambda m: init_xavier_uniform(m, config.actor.init_scaling) )

@@ -24,6 +24,8 @@ namespace AMP
             EditorGUIUtility.labelWidth = 100; // 라벨 너비를 80픽셀로 설정
             EditorGUILayout.PropertyField(serializedObject.FindProperty("motionDatabase"));
             EditorGUILayout.PropertyField(serializedObject.FindProperty("skeleton"));
+            EditorGUILayout.PropertyField(serializedObject.FindProperty("ignoreRootPos"));
+            EditorGUILayout.PropertyField(serializedObject.FindProperty("ignoreRootRot"));
             EditorGUILayout.Space(10);
             EditorGUILayout.LabelField("Animation Play Property", EditorStyles.boldLabel);
 

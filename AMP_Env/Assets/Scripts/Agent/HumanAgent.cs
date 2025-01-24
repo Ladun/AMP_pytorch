@@ -14,9 +14,11 @@ public class HumanAgent : Agent
     public MotionDatabase motionDatabase;
 
     private Transform root;
-    private JointDriveController controller;
+    private ArticulationBodyController controller;
 
     public int[] doneByContactJointIds;
+
+    private Vector3 initPos;
 
     #region MLAgents function
     public override void Initialize()
@@ -25,20 +27,25 @@ public class HumanAgent : Agent
             motionDatabase = FindFirstObjectByType<MotionDatabase>();
 
         motionDatabase.LoadDataset(false);
+        controller = GetComponent<ArticulationBodyController>();
+        SetupSkeleton();
+    }
 
+    private void SetupSkeleton()
+    {
+        controller.ResetState();
+        skeleton.CreateSkeleton();
+        skeleton.ConfigureJoints();
 
-        // skeleton.CreateSkeleton();
-        // skeleton.ConfigureJoints(); 
-        
         root = skeleton.GetJoints()[0];
-        controller = GetComponent<JointDriveController>();
-
-        foreach (var joint in skeleton.GetJoints())
-        {
-            controller.SetupBodyPart(joint);
-        }
+        initPos = root.position;
 
         var joints = skeleton.GetJoints();
+        for (int key = 0; key < joints.Count; key++)
+        {
+            controller.SetupBodyPart(key, joints[key]);
+        }
+
         for (int i = 0; i < doneByContactJointIds.Length; i++)
         {
             var t = joints[doneByContactJointIds[i]].GetComponent<GroundContact>();
@@ -51,14 +58,38 @@ public class HumanAgent : Agent
 
     public override void OnEpisodeBegin()
     {
-        foreach (var bodyPart in controller.bodyPartsList)
+        if(!skeleton.HasSkeleton())
         {
-            bodyPart.Reset(bodyPart);
+            SetupSkeleton();
         }
-        skeleton.SetAnimationData(motionDatabase.GetRandomMotionData(), true);
-        //Random start rotation to help generalize
-        root.rotation = Quaternion.Euler(0, Random.Range(0.0f, 360.0f), 0);
 
+        //Random start rotation to help generalize
+        var randomRot = Quaternion.Euler(0, Random.Range(0.0f, 360.0f), 0);
+        controller.bodyPartsDict[0].ab.TeleportRoot(initPos, randomRot);
+
+        var motionData = motionDatabase.GetRandomMotionData();
+        foreach (var ent in controller.bodyPartsDict)
+        {
+            var key = ent.Key;
+            var bodyPart = ent.Value;
+            Vector3 euler = Vector3.zero;
+
+            if(motionData.JointData.ContainsKey(key))
+            {
+                var values = motionData.JointData[key];
+                if (values.Count == 4)
+                { 
+                    euler = Utils.NormalizeAngle(new Quaternion(values[1], values[2], values[3], values[0]).eulerAngles);
+                }
+                else if (values.Count == 1)
+                {
+                    euler = Utils.NormalizeAngle(Quaternion.Euler(0, 0, values[0] * Mathf.Rad2Deg).eulerAngles);
+                }
+            }
+            bodyPart.Reset(euler);
+        }
+
+        skeleton.UpdateObs();
         env.BeginEpisode();
     }
 
@@ -69,9 +100,18 @@ public class HumanAgent : Agent
         for(int i = 0; i < obs.normals.Count; i++)
         {
             sensor.AddObservation(obs.positions[i]);
+        }
+        for (int i = 0; i < obs.normals.Count; i++)
+        {
             sensor.AddObservation(obs.normals[i]);
             sensor.AddObservation(obs.tangents[i]);
+        }
+        for (int i = 0; i < obs.normals.Count; i++)
+        {
             sensor.AddObservation(obs.linearVels[i]);
+        }
+        for (int i = 0; i < obs.normals.Count; i++)
+        {
             sensor.AddObservation(obs.angularVels[i]);
         }
         var goals = env.GetGoals(skeleton);
@@ -82,6 +122,34 @@ public class HumanAgent : Agent
         }
     }
 
+    //public override void OnActionReceived(ActionBuffers actionBuffers)
+    //{
+    //    var continuousAct = actionBuffers.ContinuousActions;
+    //    var i = -1;
+
+    //    for (int idx = 1; idx < controller.bodyPartsList.Count; idx++)
+    //    {
+    //        // Spherical하고 Revoluate 관절 구분하기.
+    //        var bodyPart = controller.bodyPartsList[idx];
+    //        var ab = bodyPart.joint;
+    //        if (ab)
+    //        {
+    //            float x = 0, y = 0, z = 0;
+    //            if (ab.angularXMotion != ConfigurableJointMotion.Locked)
+    //                x = continuousAct[++i];
+    //            if (ab.angularYMotion != ConfigurableJointMotion.Locked)
+    //                y = continuousAct[++i];
+    //            if (ab.angularZMotion != ConfigurableJointMotion.Locked)
+    //                z = continuousAct[++i];
+    //            bodyPart.SetJointTargetFromRotVector(x, y, z);
+    //        }
+    //        else
+    //        {
+    //            Debug.LogWarning($"Wrong joint: {bodyPart.joint}");
+    //        }
+    //    }
+    //}
+
     public override void OnActionReceived(ActionBuffers actionBuffers)
     {
         var continuousAct = actionBuffers.ContinuousActions;
@@ -91,83 +159,69 @@ public class HumanAgent : Agent
         {
             // Spherical하고 Revoluate 관절 구분하기.
             var bodyPart = controller.bodyPartsList[idx];
-            var ab = bodyPart.joint;
+            var ab = bodyPart.ab;
             if (ab)
             {
-                float x = 0, y = 0, z = 0;
-                if (ab.angularXMotion != ConfigurableJointMotion.Locked)
-                    x = continuousAct[++i];
-                if (ab.angularYMotion != ConfigurableJointMotion.Locked)
-                    y = continuousAct[++i];
-                if (ab.angularZMotion != ConfigurableJointMotion.Locked)
-                    z = continuousAct[++i];
-                bodyPart.SetJointTargetFromRotVector(x, y, z);
+                if (ab.isRoot)
+                    continue;
+
+                List<float> f = new List<float>();
+                if (ab.jointType != ArticulationJointType.FixedJoint)
+                {
+                    f.Add(continuousAct[++i]);
+                    if (ab.jointType == ArticulationJointType.SphericalJoint)
+                    {
+                        f.Add(continuousAct[++i]);
+                        f.Add(continuousAct[++i]);
+                    }
+                    bodyPart.SetJointTargetFromRotVector(f);
+                }
             }
             else
             {
-                Debug.LogWarning($"Wrong joint: {bodyPart.joint}");
+                Debug.LogWarning($"Wrong joint: {bodyPart.ab}");
             }
         }
     }
 
-    //public override void OnActionReceived(ActionBuffers actionBuffers)
-    //{
-    //    var continuousAct = actionBuffers.ContinuousActions;
-    //    var i = -1;
-
-    //    for(int idx = 1; idx < abController.bodyPartsList.Count; idx++)
-    //    {
-    //        // Spherical하고 Revoluate 관절 구분하기.
-    //        var bodyPart = abController.bodyPartsList[idx];
-    //        var ab = bodyPart.ab;
-    //        if (ab)
-    //        {
-    //            if (ab.isRoot)
-    //                continue;
-
-    //            List<float> f = new List<float>();
-    //            if (ab.jointType != ArticulationJointType.FixedJoint)
-    //            {
-    //                f.Add(continuousAct[++i]);
-    //                if (ab.jointType == ArticulationJointType.SphericalJoint)
-    //                {
-    //                    f.Add(continuousAct[++i]);
-    //                    f.Add(continuousAct[++i]);
-    //                }
-    //                bodyPart.SetJointTargetFromRotVector(f);
-    //            }
-    //        }
-    //        else
-    //        {
-    //            Debug.LogWarning($"Wrong joint: {bodyPart.ab}");
-    //        }
-    //    }
-    //}
-
     private void FixedUpdate()
     {
-        int status = IsNotNormal();
+        int status = ValidateAndUpdateObs();
         if (status != 0)
         {
             Debug.Log($"{transform.parent.name} End episode {status}");
+            SetupSkeleton();
+            AddReward(-100f);
             EndEpisode();
             return;
-        }
-        if (skeleton.HasSkeleton())
-        {
-            skeleton.UpdateObs();
         }
 
         if (controller.bodyPartsList.Count > 0)
         {
-            AddReward(env.GetReward(controller));
+            if (controller.bodyPartsDict[2].ab.transform.position.y < controller.bodyPartsDict[1].ab.transform.position.y)
+            {
+                SetReward(-1f);
+                EndEpisode();
+            }
+            else
+            {
+
+                AddReward(env.GetReward(controller));
+            }
         }
     }
 
-    private int IsNotNormal()
+    private int ValidateAndUpdateObs()
     {
-        if (float.IsNaN(transform.position.x) || float.IsNaN(transform.position.y) || float.IsNaN(transform.position.z) ||
-            float.IsInfinity(transform.position.x) || float.IsInfinity(transform.position.y) || float.IsInfinity(transform.position.z))
+        if (skeleton.HasSkeleton())
+        {
+            if (!skeleton.UpdateObs())
+            {
+                return 5;
+            }
+        }
+
+        if (root != null && !Utils.VectorValidate(root.transform.position))
         {
             return 1;
         }

@@ -167,11 +167,52 @@ def loss_test():
     print( torch.square(a - b).sum())
 
 def unity_env_test():
+    
     import time
     from envs.unity_env import VertorizedUnityEnv
     from algo.replay_buffer import UnityReplayBuffer
+    from algo.data.preprocess_deepmimic_data import DOFS
     
-    env = VertorizedUnityEnv(None)    
+    np.set_printoptions(precision=6, suppress=True)
+    skeleton_info = parse_skeleton_file("data/characters/humanoid3d.txt")
+    
+    def convert_data_in_disc_form(data):
+        
+        # shape of observastion from env
+        # [[pos_i, nor_i, tan_i, lin_vel_i, ang_vel_i] for i in range(15)]
+        def get_data_by_id(d, id):
+            p = 5 * 3 * id
+            return d[:, p: p + 5 * 3]
+        
+        obs = []
+        end_effector_id = skeleton_info["end_effector_id"]
+        dofs = DOFS["Humanoid"]
+        
+        # 1. root linear velocity
+        obs.append(get_data_by_id(data, 0)[:, 9:12])
+        # 2. root angular velocity
+        obs.append(get_data_by_id(data, 0)[:, 12:15])
+        
+        for key, _ in dofs[2:]:
+            # 3. normal vector
+            obs.append(get_data_by_id(data, key)[:, 3:6])
+            # 4. tangent vector
+            obs.append(get_data_by_id(data, key)[:, 6:9])
+            # 5. linear velocity
+            obs.append(get_data_by_id(data, key)[:, 9:12])
+            # 6. angular velocity
+            obs.append(get_data_by_id(data, key)[:, 12:15]) 
+            
+        # 7. end effector position
+        for key in end_effector_id:
+            obs.append(get_data_by_id(data, key)[:, 0:3])   
+        
+        obs = torch.concat(obs, dim=1)
+        return obs
+    
+    timer_manager = TimerManager()
+    
+    env = VertorizedUnityEnv(None, time_scale=0.8)    
     memory = UnityReplayBuffer(env.num_agents, 0.99, 0.95, torch.device('cpu'))
     
     state, _ = env.reset()
@@ -182,64 +223,75 @@ def unity_env_test():
     print(f"Action: {action_space}")
     print(f"Obs: {obs_space}")
     print(f"Num of agent: {env.num_agents}")
-    time_q = deque(maxlen=100)
     t = time.time()
-    for i in range(5000):
-        
-        action = np.stack([env.action_space.sample() for _ in range(len(state))])        
-        next_state, reward, terminated, truncated, info = env.step(action)
-
-        if len(info['terminal_steps']) > 0:
-            agent_id =info['terminal_steps'].agent_id
-            ns, r, te, tr = info['terminal_state']
+    with timer_manager.get_timer("total collect trajectory"):        
+        for i in range(10000):
             
-            memory.store(agent_id=info['terminal_steps'].agent_id,
-                         state=state[agent_id],
-                         action=action[agent_id],
-                         reward=r,
-                         value=np.ones_like(r),
-                         logprob=np.ones_like(r),
-                         done=te + tr)
-        
-        while len(info['decision_steps']) == 0:                
-            empty_ac = np.empty((0, *env.action_space.shape))   
-            next_state, reward, terminated, truncated, info = env.step(empty_ac)
+            action = np.stack([env.action_space.sample() for _ in range(len(state))])
+            with timer_manager.get_timer("one step"):        
+                with timer_manager.get_timer("step"):     
+                    next_state, reward, terminated, truncated, info = env.step(action)
+      
+                    if len(info['terminal_steps']) > 0:
+                        agent_id =info['terminal_steps'].agent_id
+                        ns, r, te, tr = info['terminal_state']
+                        
+                        memory.store(agent_id=info['terminal_steps'].agent_id,
+                                    state=state[agent_id],
+                                    action=action[agent_id],
+                                    reward=r,
+                                    value=np.ones_like(r),
+                                    logprob=np.ones_like(r),
+                                    done=te + tr)
+                    
+                    while len(info['decision_steps']) == 0:                
+                        empty_ac = np.empty((0, *env.action_space.shape))   
+                        next_state, reward, terminated, truncated, info = env.step(empty_ac)
 
-            if len(info['terminal_steps']) > 0:
-                agent_id =info['terminal_steps'].agent_id
-                ns, r, te, tr = info['terminal_state']
-                
-                memory.store(agent_id=info['terminal_steps'].agent_id,
-                             state=state[agent_id],
-                             action=action[agent_id],
-                             reward=r,
-                             value=np.ones_like(r),
-                             logprob=np.ones_like(r),
-                             done=te + tr)
-                
-        memory.store(agent_id=info['decision_steps'].agent_id,
-                     state=state,
-                     action=action,
-                     reward=reward,
-                     value=np.ones_like(reward),
-                     logprob=np.ones_like(reward),
-                     done=np.zeros_like(reward))
-        
-        time_q.append(np.round(time.time() - t, 5))
-        print(f"Step {i} {np.average(time_q)}")
-        t = time.time()
-        done = terminated + truncated
+                        if len(info['terminal_steps']) > 0:
+                            agent_id =info['terminal_steps'].agent_id
+                            ns, r, te, tr = info['terminal_state']
+                            
+                            memory.store(agent_id=info['terminal_steps'].agent_id,
+                                        state=state[agent_id],
+                                        action=action[agent_id],
+                                        reward=r,
+                                        value=np.ones_like(r),
+                                        logprob=np.ones_like(r),
+                                        done=te + tr)
+                            
+                    memory.store(agent_id=info['decision_steps'].agent_id,
+                                state=state,
+                                action=action,
+                                reward=reward,
+                                value=np.ones_like(reward),
+                                logprob=np.ones_like(reward),
+                                done=np.zeros_like(reward))
+            
+            t = time.time()
+            done = terminated + truncated
         
     print(next_state.shape)
     print(reward.shape)
     print(done.shape)
         
-    for k,v in memory.temp_memory[0].items():
-        print(f"{k}: {v[0] if v is not None else None}")
+    # for k,v in memory.temp_memory[0].items():
+    #     shape = v[2].shape if v is not None else None
+    #     value = v[2] if v is not None else None
+    #     print(f"{k}, {shape}: {value}")
+    print(f"Memory size: {len(memory)}")
     traj = memory.compute_gae_and_get(next_state, torch.tensor(np.ones_like(done)), done)
     
     print(traj.keys())
     print(traj['state'].shape)
+    
+    disc_s = convert_data_in_disc_form(traj['state'])
+    print(disc_s.shape)
+    
+    for k, v in timer_manager.timers.items():
+        print(f"\t {k} time: {round(v.clear(), 5)} sec")
+        
+    env.close()
     
 def motion_dataset_test():
     from torch.utils.data import DataLoader
@@ -282,18 +334,21 @@ def actor_test_for_onnx():
 # loss_test()
 
 
-# unity_env_test()
-
+unity_env_test()
 
 # motion_dataset_test()
 
 # actor_test_for_onnx()
 
+# timer_manager = TimerManager()
 
-timer_manager = TimerManager()
-
-with timer_manager.get_timer("Dataset test"):
-    motion_dataset_test();    
+# with timer_manager.get_timer("Dataset test"):
+#     motion_dataset_test();    
     
-for k, v in timer_manager.timers.items():
-    print(f"\t {k} time: {round(v.clear(), 5)} sec")
+# for k, v in timer_manager.timers.items():
+#     print(f"\t {k} time: {round(v.clear(), 5)} sec")
+
+# a = [1]
+# a += [2]
+# print(a)
+

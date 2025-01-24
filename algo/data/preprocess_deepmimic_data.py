@@ -118,9 +118,9 @@ def parse_motion_file(path, skeleton_info) -> np.array:
             rotations[key] = rot
             
             # 3. normal vector
-            obs.append(quat_vec_multiply(rot, np.array((0, 1, 0))))
+            obs.append(quat_vec_multiply(rot, np.array((0, -1, 0))))
             # 4. tangent vector
-            obs.append(quat_vec_multiply(rot, np.array((0, 0, 1))))  
+            obs.append(quat_vec_multiply(rot, np.array((1, 0, 0))))  
 
             # calc current position
             cur_pos = calc_cur_pos(key, positions, rotations, skeleton_info)

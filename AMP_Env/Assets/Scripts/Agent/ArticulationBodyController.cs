@@ -26,6 +26,45 @@ namespace AMP
         [FormerlySerializedAs("thisABController")]
         [HideInInspector] public ArticulationBodyController thisABController;
 
+        public void Reset(Vector3 euler)
+        {
+
+            if (ab.jointType == ArticulationJointType.SphericalJoint)
+            {
+                ab.SetDriveRotation(Quaternion.Euler(euler)); 
+                ab.resetJointPosition(ab.ToTargetRotationInReducedSpace(Quaternion.Euler(euler), false));
+
+            }
+            else if (ab.jointType == ArticulationJointType.RevoluteJoint)
+            {
+                ab.SetDriveTarget(ArticulationDriveAxis.X, euler.z);
+                ab.resetJointPosition(euler.z * Mathf.Deg2Rad);
+            }
+            ab.linearVelocity = Vector3.zero;
+            ab.angularVelocity = Vector3.zero;
+        }
+
+        public void SetJointTarget(List<float> f)
+        {
+            if (ab.jointType == ArticulationJointType.SphericalJoint)
+            {
+                Vector3 euler;
+
+                euler.x = (f[0] + 1) * 0.5f * (ab.xDrive.upperLimit - ab.xDrive.lowerLimit) + ab.xDrive.lowerLimit;
+                euler.y = (f[1] + 1) * 0.5f * (ab.yDrive.upperLimit - ab.yDrive.lowerLimit) + ab.yDrive.lowerLimit;
+                euler.z = (f[2] + 1) * 0.5f * (ab.zDrive.upperLimit - ab.zDrive.lowerLimit) + ab.zDrive.lowerLimit;
+
+                ab.SetDriveRotation(Quaternion.Euler(euler));
+            }
+
+            else if (ab.jointType == ArticulationJointType.RevoluteJoint)
+            {
+                float q = f[0] * Mathf.Rad2Deg;
+                q = Mathf.Clamp(q, ab.xDrive.lowerLimit, ab.xDrive.upperLimit);
+                ab.SetDriveTarget(ArticulationDriveAxis.X, q);
+            }
+        }
+
         public void SetJointTargetFromRotVector(List<float> f)
         {
             if (ab.jointType == ArticulationJointType.SphericalJoint)
@@ -35,25 +74,24 @@ namespace AMP
                 float z = f[2];
 
                 float theta = Mathf.Sqrt(x * x + y * y + z * z);
+                Quaternion rot = Quaternion.identity;
                 if (theta != 0)
                 {
                     x = (x / theta);
                     y = (y / theta);
                     z = (z / theta);
+                    rot = new Quaternion(x * Mathf.Sin(theta / 2),
+                                         y * Mathf.Sin(theta / 2),
+                                         z * Mathf.Sin(theta / 2),
+                                         Mathf.Cos(theta / 2));
                 }
-
-                Quaternion rot = new Quaternion(x * Mathf.Sign(theta / 2),
-                                                y * Mathf.Sign(theta / 2),
-                                                z * Mathf.Sign(theta / 2),
-                                                Mathf.Cos(theta / 2));
                 Vector3 euler = rot.eulerAngles;
 
                 euler.x = Mathf.Clamp(euler.x, ab.xDrive.lowerLimit, ab.xDrive.upperLimit);
-                ab.SetDriveTarget(ArticulationDriveAxis.X, euler.x);
                 euler.y = Mathf.Clamp(euler.y, ab.yDrive.lowerLimit, ab.yDrive.upperLimit);
-                ab.SetDriveTarget(ArticulationDriveAxis.Y, euler.y);
                 euler.z = Mathf.Clamp(euler.z, ab.zDrive.lowerLimit, ab.zDrive.upperLimit);
-                ab.SetDriveTarget(ArticulationDriveAxis.Z, euler.z);
+
+                ab.SetDriveRotation(Quaternion.Euler(euler));
             }
 
             else if(ab.jointType == ArticulationJointType.RevoluteJoint)
@@ -73,7 +111,7 @@ namespace AMP
         public float damping = 10f;    
 
 
-        [HideInInspector] public Dictionary<int, ArticulationBodyPart> bodyPartsDict = new Dictionary<int, ArticulationBodyPart>();
+        [HideInInspector] public SortedDictionary<int, ArticulationBodyPart> bodyPartsDict = new SortedDictionary<int, ArticulationBodyPart>();
         [HideInInspector] public List<ArticulationBodyPart> bodyPartsList = new List<ArticulationBodyPart>();
 
         public void SetupBodyPart(int key, Transform t)

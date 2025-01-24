@@ -1,12 +1,12 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using static AMP.DeepMinicSkeleton;
 
 namespace AMP
 {
     public abstract class Skeleton : MonoBehaviour
     {
-
         public class Observastion
         {
             public List<Vector3> positions = new List<Vector3>();
@@ -35,12 +35,15 @@ namespace AMP
 
         public string skeletonFile;
 
+        public abstract Transform GetRoot();
+
+        public abstract void ResetSkeleton();
         public abstract void CreateSkeleton();
 
         public abstract void ConfigureJoints();
         public abstract void SetAnimationData(MotionFrameData motionFrameData, bool ignoreRootPos = false, bool ignoreRootRot = false);
 
-        public abstract void UpdateObs();
+        public abstract bool UpdateObs();
 
         public abstract bool HasSkeleton();
 

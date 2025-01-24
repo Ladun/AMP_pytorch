@@ -20,6 +20,9 @@ namespace AMP
         public List<MotionFrameData> frameData;
         public int currentFrame = 0;
 
+        public bool ignoreRootPos = false;
+        public bool ignoreRootRot = false;
+
 
         public int totalFrame
         {
@@ -58,7 +61,7 @@ namespace AMP
                 return;
 
             MotionFrameData data = frameData[currentFrame];
-            skeleton.SetAnimationData(data);
+            skeleton.SetAnimationData(data, ignoreRootPos, ignoreRootRot);
         }
 
     }

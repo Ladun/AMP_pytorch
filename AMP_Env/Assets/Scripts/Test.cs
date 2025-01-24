@@ -3,35 +3,73 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Data;
 using UnityEngine;
+using static UnityEngine.GraphicsBuffer;
 
 public class Test : MonoBehaviour
 {
     public DeepMinicSkeleton skeleton;
+    public DeepMinicSkeleton testSkeleton;
     public MotionDatabase motionDatabase;
+
+    public ArticulationBodyController controller;
+    private Vector3 initPos;
+
+    private void Awake()
+    {
+        if(testSkeleton)
+            testSkeleton.CreateSkeleton();
+
+
+        skeleton.CreateSkeleton();
+        skeleton.ConfigureJoints();
+        var joints = skeleton.GetJoints();
+        var root = joints[0];
+
+        root.GetComponent<ArticulationBody>().immovable = true;
+
+        controller = skeleton.transform.GetComponent<ArticulationBodyController>();
+        for (int key = 0; key < joints.Count; key++)
+        {
+            controller.SetupBodyPart(key, joints[key]);
+        }
+        initPos = root.position;
+    }
+
 
     private void Update()
     {
         if (Input.GetKeyDown(KeyCode.T))
         {
-            if(Time.timeScale > 0.1f)
+            if (Time.timeScale > 0.1f)
                 Time.timeScale -= 0.1f;
-            else if(Time.timeScale > 0.01f)
+            else if (Time.timeScale > 0.01f)
                 Time.timeScale -= 0.01f;
         }
         if (Input.GetKeyDown(KeyCode.Y))
             Time.timeScale = 1f;
 
+        if (Input.GetKeyDown(KeyCode.Alpha1))
+            Time.timeScale = 1;
+        if (Input.GetKeyDown(KeyCode.Alpha2))
+            Time.timeScale *= 0.5f;
+
+        ControlArticulationBody();
+    }
+
+
+    private void ControlConfigurableJoint()
+    {  // Configurable Joint Test
         if (Input.GetKeyDown(KeyCode.U))
         {
             var jointTransforms = skeleton.GetJoints();
-            foreach(Transform joint in jointTransforms)
+            foreach (var joint in jointTransforms)
             {
                 ConfigurableJoint cj = joint.GetComponent<ConfigurableJoint>();
                 if (cj)
                     cj.targetRotation = Quaternion.identity;
             }
         }
-            
+
         if (Input.GetKeyDown(KeyCode.I))
         {
             if (!motionDatabase.HasMotion)
@@ -42,7 +80,7 @@ public class Test : MonoBehaviour
             var motionData = motionDatabase.GetRandomMotionData();
             skeleton.SetAnimationData(motionData, true, true);
 
-            foreach(var motion in motionData.JointData)
+            foreach (var motion in motionData.JointData)
             {
                 int key = motion.Key;
                 List<float> values = motion.Value;
@@ -58,15 +96,16 @@ public class Test : MonoBehaviour
                     }
                     else
                     {
-                        euler.x= values[0] * Mathf.Rad2Deg;
+                        euler.x = values[0] * Mathf.Rad2Deg;
                     }
 
                     //euler.x = Mathf.Lerp(joint.lowAngularXLimit.limit, joint.highAngularXLimit.limit, euler.x);
                     //euler.y = Mathf.Lerp(-joint.angularYLimit.limit, joint.angularYLimit.limit, euler.y);
                     //euler.z = Mathf.Lerp(-joint.angularZLimit.limit, joint.angularZLimit.limit, euler.z);
 
-                    
-                    joint.targetRotation = Quaternion.Euler(euler);
+
+                    //joint.targetRotation = Quaternion.Euler(euler);
+                    joint.SetTargetRotationLocal(Quaternion.Euler(euler), Quaternion.identity);
 
                 }
 
@@ -74,153 +113,133 @@ public class Test : MonoBehaviour
             }
         }
 
+    }
+    
 
-        if(Input.GetKeyDown(KeyCode.X))
+    private void ControlArticulationBody()
+    {
+        if (Input.GetKeyDown(KeyCode.U))
+        {
+            var jointTransforms = skeleton.GetJoints();
+            foreach (var joint in jointTransforms)
+            {
+                ArticulationBody ab = joint.GetComponent<ArticulationBody>();
+                if (ab)
+                {
+                    ab.SetDriveTarget(ArticulationDriveAxis.X, 0);
+                    ab.SetDriveTarget(ArticulationDriveAxis.Y, 0);
+                    ab.SetDriveTarget(ArticulationDriveAxis.Z, 0);
+
+                    if (ab.jointType == ArticulationJointType.SphericalJoint)
+                    {
+                        ab.resetJointPosition(Vector3.zero);
+                    }
+                    else if (ab.jointType == ArticulationJointType.RevoluteJoint)
+                    {
+                        ab.resetJointPosition(0);
+                    }
+                }
+            }
+        }
+
+        // Articulation Body Test
+        if (Input.GetKeyDown(KeyCode.I))
         {
             if (!skeleton.HasSkeleton())
             {
                 skeleton.CreateSkeleton();
                 skeleton.ConfigureJoints();
+                Debug.Log("Create new skeleton");
             }
 
             if (!motionDatabase.HasMotion)
                 motionDatabase.LoadDataset();
 
             var motionData = motionDatabase.GetRandomMotionData();
+            testSkeleton.SetAnimationData(motionData, true, true);
+
             var jointTransforms = skeleton.GetJoints();
-            Dictionary<Transform, int> jointToKey = new Dictionary<Transform, int>();
-            for (int key = 0; key < jointTransforms.Count; key++)
+
+            if (Input.GetKey(KeyCode.L))
             {
-                jointToKey[jointTransforms[key]] = key;
-            }
-
-            List<float> f = new List<float>();
-
-            Stack<ArticulationBody> st = new Stack<ArticulationBody>();
-            ArticulationBody rootAb = jointTransforms[0].GetComponent<ArticulationBody>();
-            st.Push(rootAb);
-
-            while(st.Count > 0)
-            {
-                ArticulationBody ab = st.Pop();
-                List<float> values = motionData.JointData[jointToKey[ab.transform]];
-                Vector3 euler = Vector3.zero;
-
-                if (ab.isRoot)
+                var randomRot = Quaternion.Euler(0, Random.Range(0.0f, 360.0f), 0);
+                controller.bodyPartsDict[0].ab.TeleportRoot(initPos, randomRot);
+                foreach (var ent in controller.bodyPartsDict)
                 {
-                    if (ab.isRoot && !ab.immovable)
+                    var key = ent.Key;
+                    var bodyPart = ent.Value;
+                    Vector3 euler = Vector3.zero;
+
+                    if (motionData.JointData.ContainsKey(key))
                     {
-                        Vector3 pos = new Vector3(values[0], values[1], values[2]) * skeleton.lengthScale;
-                        euler = Utils.NormalizeAngle(new Quaternion(values[4], values[5], values[6], values[3]).eulerAngles);
+                        var values = motionData.JointData[key];
 
-                        f.Add(pos.x);
-                        f.Add(pos.y);
-                        f.Add(pos.z);
-                        f.Add(euler.x * Mathf.Deg2Rad);
-                        f.Add(euler.y * Mathf.Deg2Rad);
-                        f.Add(euler.z * Mathf.Deg2Rad);
-
-                        ab.TeleportRoot(pos, Quaternion.Euler(euler));
+                        if (values.Count == 4)
+                        {
+                            euler = Utils.NormalizeAngle(new Quaternion(values[1], values[2], values[3], values[0]).eulerAngles);
+                        }
+                        else if (values.Count == 1)
+                        {
+                            euler = Utils.NormalizeAngle(Quaternion.Euler(0, 0, values[0] * Mathf.Rad2Deg).eulerAngles);
+                        }
+                        bodyPart.Reset(euler);
                     }
                 }
-                else
+            }
+            else
+            {
+                foreach (var motion in motionData.JointData)
                 {
+                    ArticulationBody ab = jointTransforms[motion.Key].GetComponent<ArticulationBody>();
+                    List<float> values = motion.Value;
+                    Vector3 euler = Vector3.zero;
 
-                    if (values.Count == 4)
+                    if (ab.isRoot)
                     {
-                        euler = Utils.NormalizeAngle(new Quaternion(values[1], values[2], values[3], values[0]).eulerAngles);
-                        f.Add(euler.x * Mathf.Deg2Rad);
-                        f.Add(euler.y * Mathf.Deg2Rad);
-                        f.Add(euler.z * Mathf.Deg2Rad);
-                    }
-                    else if (values.Count == 1)
-                    {
-                        euler = Utils.NormalizeAngle(Quaternion.Euler(0, 0, values[0] * Mathf.Rad2Deg).eulerAngles);
-                        f.Add(euler.z * Mathf.Deg2Rad);
-                    }
-
-
-                    if (Input.GetKey(KeyCode.Z))
-                    {
-                        if (ab.jointType == ArticulationJointType.SphericalJoint)
+                        if (ab.isRoot && !ab.immovable)
                         {
-                            ab.SetDriveTarget(ArticulationDriveAxis.X, euler.x);
-                            ab.SetDriveTarget(ArticulationDriveAxis.Y, euler.y);
-                            ab.SetDriveTarget(ArticulationDriveAxis.Z, euler.z);
-                        }
-                        else if (ab.jointType == ArticulationJointType.RevoluteJoint)
-                        {
-                            ab.SetDriveTarget(ArticulationDriveAxis.X, euler.z);
+                            Vector3 pos = new Vector3(values[0], values[1], values[2]) * skeleton.lengthScale;
+                            euler = Utils.NormalizeAngle(new Quaternion(values[4], values[5], values[6], values[3]).eulerAngles);
+                            ab.TeleportRoot(pos, Quaternion.Euler(euler));
                         }
                     }
-                }
+                    else
+                    {
+                        if (values.Count == 4)
+                        {
+                            euler = Utils.NormalizeAngle(new Quaternion(values[1], values[2], values[3], values[0]).eulerAngles);
+                            
+                        }
+                        else if (values.Count == 1)
+                        {
+                            euler = Utils.NormalizeAngle(Quaternion.Euler(0, 0, values[0] * Mathf.Rad2Deg).eulerAngles);
+                        }
 
-
-                for (int i = 0; i < ab.transform.childCount; i++)
-                {
-                    ArticulationBody a = ab.transform.GetChild(i).GetComponent<ArticulationBody>();
-                    if(a && (a.jointType == ArticulationJointType.SphericalJoint || a.jointType == ArticulationJointType.RevoluteJoint))
-                        st.Push(a);
+                        if (Input.GetKey(KeyCode.J))
+                        {
+                            if (ab.jointType == ArticulationJointType.SphericalJoint)
+                            {
+                                ab.SetDriveRotation(Quaternion.Euler(euler));
+                            }
+                            else if (ab.jointType == ArticulationJointType.RevoluteJoint)
+                            {
+                                ab.SetDriveTarget(ArticulationDriveAxis.X, euler.z);
+                            }
+                        }
+                        if (Input.GetKey(KeyCode.K))
+                        {
+                            if (ab.jointType == ArticulationJointType.SphericalJoint)
+                            {
+                                ab.resetJointPosition(ab.ToTargetRotationInReducedSpace(Quaternion.Euler(euler), false));
+                            }
+                            else if (ab.jointType == ArticulationJointType.RevoluteJoint)
+                            {
+                                ab.resetJointPosition(euler.z * Mathf.Deg2Rad);
+                            }
+                        }
+                    }
                 }
             }
-
-            if (Input.GetKey(KeyCode.C))
-            {
-                rootAb.SetJointPositions(f);
-            }
-
-            //foreach (var motion in motionData.JointData)
-            //{
-            //    ArticulationBody ab = jointDict[motion.Key].GetComponent<ArticulationBody>();
-            //    List<float> values = motion.Value;
-            //    Vector3 euler = Vector3.zero;
-
-            //    if (ab.isRoot)
-            //    {
-            //        ab.immovable = true;
-            //        if (ab.isRoot && !ab.immovable)
-            //        {
-            //            Vector3 pos = new Vector3(values[0], values[1], values[2]) * skeleton.lengthScale;
-            //            euler = Utils.NormalizeAngle(new Quaternion(values[4], values[5], values[6], values[3]).eulerAngles);
-
-            //            f.Add(pos.x);
-            //            f.Add(pos.y);
-            //            f.Add(pos.z);
-            //            f.Add(euler.x * Mathf.Deg2Rad);
-            //            f.Add(euler.y * Mathf.Deg2Rad);
-            //            f.Add(euler.z * Mathf.Deg2Rad);
-            //        }
-            //    }
-            //    else
-            //    {
-
-            //        if (values.Count == 4)
-            //        {
-            //            euler = Utils.NormalizeAngle(new Quaternion(values[1], values[2], values[3], values[0]).eulerAngles);
-            //            f.Add(euler.x * Mathf.Deg2Rad);
-            //            f.Add(euler.y * Mathf.Deg2Rad);
-            //            f.Add(euler.z * Mathf.Deg2Rad);
-            //        }
-            //        else if (values.Count == 1)
-            //        {
-            //            euler = Utils.NormalizeAngle(Quaternion.Euler(0, 0, values[0] * Mathf.Rad2Deg).eulerAngles);
-            //            f.Add(euler.z * Mathf.Deg2Rad);
-            //        }
-
-
-            //        if (ab.jointType == ArticulationJointType.SphericalJoint)
-            //        {
-            //            ab.SetDriveTarget(ArticulationDriveAxis.X, euler.x);
-            //            ab.SetDriveTarget(ArticulationDriveAxis.Y, euler.y);
-            //            ab.SetDriveTarget(ArticulationDriveAxis.Z, euler.z);
-            //        }
-            //        else if (ab.jointType == ArticulationJointType.RevoluteJoint)
-            //        {
-            //            ab.SetDriveTarget(ArticulationDriveAxis.X, euler.z);
-            //        }
-            //    }
-            //}
-
 
         }
     }

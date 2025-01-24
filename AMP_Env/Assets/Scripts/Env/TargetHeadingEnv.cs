@@ -35,15 +35,15 @@ public class TargetHeadingEnv : TrainingEnv
         return new List<float> { Mathf.Cos(tarHeading), -Mathf.Sin(tarHeading), tarSpeed };
     }
 
-    public override float GetReward(JointDriveController controller)
+    public override float GetReward(ArticulationBodyController controller)
     {
 
         Vector3 cmv = Vector3.zero;
         float totalMass = 0;
         foreach(var bp in controller.bodyPartsList)
         {
-            cmv += bp.rb.linearVelocity * bp.rb.mass;
-            totalMass += bp.rb.mass;
+            cmv += bp.ab.linearVelocity * bp.ab.mass;
+            totalMass += bp.ab.mass;
         }
         cmv = cmv / totalMass;
         cmv.y = 0;
