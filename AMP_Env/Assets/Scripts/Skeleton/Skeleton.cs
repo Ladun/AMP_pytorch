@@ -48,6 +48,7 @@ namespace AMP
         public abstract bool HasSkeleton();
 
         public abstract List<Transform> GetJoints();
+        public abstract List<Transform> GetBodys();
 
     }
 }

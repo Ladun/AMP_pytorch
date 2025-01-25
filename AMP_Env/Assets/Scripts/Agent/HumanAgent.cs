@@ -5,6 +5,7 @@ using Unity.MLAgents;
 using Unity.MLAgents.Actuators;
 using Unity.MLAgents.Sensors;
 using AMP;
+using Unity.VisualScripting;
 
 public class HumanAgent : Agent
 {
@@ -191,14 +192,21 @@ public class HumanAgent : Agent
         {
             Debug.Log($"{transform.parent.name} End episode {status}");
             SetupSkeleton();
-            AddReward(-100f);
+            SetReward(-10f);
             EndEpisode();
             return;
         }
 
         if (controller.bodyPartsList.Count > 0)
         {
-            if (controller.bodyPartsDict[2].ab.transform.position.y < controller.bodyPartsDict[1].ab.transform.position.y)
+            var joints = skeleton.GetJoints();
+            var left_ankle = joints[11];
+            var right_ankle = joints[5];
+            var neck = joints[2];
+
+            var ankle_mid = (left_ankle.position + right_ankle.position) / 2;
+            var ankle_to_neck = (neck.position - ankle_mid).normalized;
+            if (Vector3.Angle(Vector3.up, ankle_to_neck) > 50)
             {
                 SetReward(-1f);
                 EndEpisode();

@@ -19,6 +19,7 @@ namespace AMP
 
         private DeepMimicParser parser = new DeepMimicParser();
         public Transform[] jointTransforms;
+        public Transform[] bodyTransforms;
 
         private MotionFrameData curMotionFrameData = null;
 
@@ -86,6 +87,7 @@ namespace AMP
 
             // Draw body shape
             Dictionary<Color, Material> colors = new Dictionary<Color, Material>();
+            bodyTransforms = new Transform[parser.draws.Count];
             foreach (var entry in parser.draws)
             {
                 DeepMimicParser.DrawShape body = entry.Value;
@@ -99,6 +101,7 @@ namespace AMP
                     colors[body.color] = targetMat;
                 }
                 obj.GetComponent<MeshRenderer>().material = targetMat;
+                bodyTransforms[body.id] = obj.transform;
             }
 
             UpdateObs();
@@ -142,7 +145,6 @@ namespace AMP
                 Debug.LogError($"Missing type implementation {body.shape}");
                 return null;
             }
-
 
             // Set shapes
             bodyObj.name = body.name + " (body)";
@@ -426,6 +428,10 @@ namespace AMP
             return jointTransforms.ToList();
         }
 
+        public override List<Transform> GetBodys()
+        {
+            return bodyTransforms.ToList();
+        }
 
         private Quaternion GetRotFromMotionData(List<float> values)
         {
