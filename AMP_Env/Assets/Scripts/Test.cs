@@ -11,8 +11,12 @@ public class Test : MonoBehaviour
     public DeepMinicSkeleton testSkeleton;
     public MotionDatabase motionDatabase;
 
-    public ArticulationBodyController controller;
+    public Direction testDir;
+    public Vector2 testVec;
+
+    private ArticulationBodyController controller;
     private Vector3 initPos;
+
 
     private void Awake()
     {
@@ -45,14 +49,15 @@ public class Test : MonoBehaviour
             else if (Time.timeScale > 0.01f)
                 Time.timeScale -= 0.01f;
         }
-        if (Input.GetKeyDown(KeyCode.Y))
-            Time.timeScale = 1f;
 
         if (Input.GetKeyDown(KeyCode.Alpha1))
             Time.timeScale = 1;
         if (Input.GetKeyDown(KeyCode.Alpha2))
             Time.timeScale *= 0.5f;
+        if (Input.GetKeyDown(KeyCode.Alpha3))
+            Time.timeScale = 20;
 
+        testDir.SetHeading(Mathf.Atan2(testVec.y, testVec.x));
         ControlArticulationBody();
     }
 

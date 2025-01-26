@@ -9,11 +9,12 @@ using Unity.VisualScripting;
 
 public class HumanAgent : Agent
 {
+    public Direction cmvDir;
 
     public Skeleton skeleton;
     public TrainingEnv env;
-    public MotionDatabase motionDatabase;
 
+    private MotionDatabase motionDatabase;
     private Transform root;
     private ArticulationBodyController controller;
 
@@ -183,6 +184,24 @@ public class HumanAgent : Agent
                 Debug.LogWarning($"Wrong joint: {bodyPart.ab}");
             }
         }
+    }
+
+    private void Update()
+    {
+        if (controller == null || cmvDir == null)
+            return;
+
+        Vector3 cmv = Vector3.zero;
+        float totalMass = 0;
+        foreach (var bp in controller.bodyPartsList)
+        {
+            cmv += bp.ab.linearVelocity * bp.ab.mass;
+            totalMass += bp.ab.mass;
+        }
+        cmv = cmv / totalMass;
+        var vec = new Vector2(cmv.x, -cmv.z).normalized;
+
+        cmvDir.SetHeading(Mathf.Atan2(vec.y, vec.x));
     }
 
     private void FixedUpdate()

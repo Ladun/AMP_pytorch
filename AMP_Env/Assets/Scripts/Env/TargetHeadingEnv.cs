@@ -1,12 +1,15 @@
 using UnityEngine;
 using AMP;
 using System.Collections.Generic;
+using NUnit;
 
 public class TargetHeadingEnv : TrainingEnv
 {
     public Direction direction;
+
     private float targetSpeed = 1;
     private float targetHeading = 0;
+
 
     public Vector3 center;
     public Vector3 size;
@@ -16,7 +19,8 @@ public class TargetHeadingEnv : TrainingEnv
         targetSpeed = Random.Range(1f, 5f);
         targetHeading = Random.Range(0, 1f) * Mathf.PI * 2;
 
-        if(direction != null)
+
+        if (direction != null)
         {
             direction.SetHeading(targetHeading);
         }
@@ -47,6 +51,7 @@ public class TargetHeadingEnv : TrainingEnv
         }
         cmv = cmv / totalMass;
         cmv.y = 0;
+        cmv.z *= -1;
 
         Vector3 targetDir = new Vector3(Mathf.Cos(targetHeading), 0, -Mathf.Sin(targetHeading));
         float d = targetSpeed - Vector3.Dot(targetDir, cmv);

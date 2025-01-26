@@ -22,27 +22,26 @@ public class Direction : MonoBehaviour
             Vector3 targetPos = target.position;
             targetPos.y = transform.position.y;
 
-
+            transform.eulerAngles = Vector3.up * Vector3.SignedAngle(Vector3.right, (targetPos - transform.position).normalized, Vector3.up);
         }
     }
 
-    public void SetHeading(float heading)
+    public void SetHeading(float radian)
     {
-        this.heading = heading;
+        this.heading = radian;
         transform.eulerAngles = Vector3.up * heading * Mathf.Rad2Deg;
     }
 
     private void OnDrawGizmosSelected()
     {
-        float h = heading * Mathf.Deg2Rad;
-        Vector3 dir = new Vector3(Mathf.Cos(h), 0, -Mathf.Sin(h));
+        Vector3 dir = new Vector3(Mathf.Cos(heading), 0, -Mathf.Sin(heading));
         Debug.DrawRay(transform.position, dir);
 
         Vector3 d = transform.rotation * Vector3.right;
         float characterHeading = Mathf.Atan2(-d.z, d.x);
         Debug.DrawRay(transform.position, d, Color.blue);
 
-        float tarHeading = h - characterHeading;
-        Debug.DrawRay(transform.position, new Vector3(Mathf.Cos(tarHeading), 0, -Mathf.Sin(tarHeading)), Color.red);
+        float tarHeading = heading - characterHeading;
+        Debug.DrawRay(transform.position, new Vector3(Mathf.Cos(tarHeading), 0, Mathf.Sin(tarHeading)), Color.red);
     }
 }
