@@ -1,15 +1,15 @@
 using UnityEngine;
 using AMP;
 using System.Collections.Generic;
-using NUnit;
 
 public class TargetHeadingEnv : TrainingEnv
 {
     public Direction direction;
 
+    public float velRewardScale = 1.0f;
+
     private float targetSpeed = 1;
     private float targetHeading = 0;
-
 
     public Vector3 center;
     public Vector3 size;
@@ -54,14 +54,16 @@ public class TargetHeadingEnv : TrainingEnv
         cmv.z *= -1;
 
         Vector3 targetDir = new Vector3(Mathf.Cos(targetHeading), 0, -Mathf.Sin(targetHeading));
-        float d = targetSpeed - Vector3.Dot(targetDir, cmv);
+        float avg_speed = Vector3.Dot(targetDir, cmv);
 
-        if(Mathf.Abs(d) > targetSpeed * 2)
+        float vel_reward = 0;
+        if (avg_speed > 0)
         {
-            // End episode
+            float vel_err = targetSpeed - avg_speed;
+            vel_reward = Mathf.Exp(-velRewardScale * vel_err * vel_err); 
         }
 
-        return Mathf.Exp(-0.25f * d);
+        return vel_reward;
     }
 
     public override bool ValidateEnvironment(Skeleton skeleton)

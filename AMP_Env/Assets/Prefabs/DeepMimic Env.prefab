@@ -262,6 +262,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   direction: {fileID: 8556692468720257853}
+  velRewardScale: 0.25
   center: {x: 0, y: 3.76, z: 0}
   size: {x: 71, y: 11.25, z: 71}
 --- !u!1 &832577001994294742

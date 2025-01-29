@@ -102,22 +102,13 @@ public class HumanAgent : Agent
         for(int i = 0; i < obs.normals.Count; i++)
         {
             sensor.AddObservation(obs.positions[i]);
-        }
-        for (int i = 0; i < obs.normals.Count; i++)
-        {
             sensor.AddObservation(obs.normals[i]);
             sensor.AddObservation(obs.tangents[i]);
-        }
-        for (int i = 0; i < obs.normals.Count; i++)
-        {
             sensor.AddObservation(obs.linearVels[i]);
-        }
-        for (int i = 0; i < obs.normals.Count; i++)
-        {
             sensor.AddObservation(obs.angularVels[i]);
         }
-        var goals = env.GetGoals(skeleton);
 
+        var goals = env.GetGoals(skeleton);
         foreach (var g in goals)
         {
             sensor.AddObservation(g);
