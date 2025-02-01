@@ -28,7 +28,7 @@ public class Direction : MonoBehaviour
 
     public void SetHeading(float radian)
     {
-        this.heading = radian;
+        heading = radian;
         transform.eulerAngles = Vector3.up * heading * Mathf.Rad2Deg;
     }
 
@@ -42,6 +42,6 @@ public class Direction : MonoBehaviour
         Debug.DrawRay(transform.position, d, Color.blue);
 
         float tarHeading = heading - characterHeading;
-        Debug.DrawRay(transform.position, new Vector3(Mathf.Cos(tarHeading), 0, Mathf.Sin(tarHeading)), Color.red);
+        Debug.DrawRay(transform.position, new Vector3(Mathf.Cos(tarHeading), 0, -Mathf.Sin(tarHeading)), Color.red);
     }
 }

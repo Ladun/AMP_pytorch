@@ -6,6 +6,7 @@ public class TargetHeadingEnv : TrainingEnv
 {
     public Direction direction;
 
+    public bool usingArticulationPenalty = false;
     public float velRewardScale = 1.0f;
 
     private float targetSpeed = 1;
@@ -61,6 +62,23 @@ public class TargetHeadingEnv : TrainingEnv
         {
             float vel_err = targetSpeed - avg_speed;
             vel_reward = Mathf.Exp(-velRewardScale * vel_err * vel_err); 
+        }
+
+        if(usingArticulationPenalty)
+        {
+            float penalty = 0;
+            float jointCnt = 0;
+            foreach (var bp in controller.bodyPartsList)
+            {
+                if(bp.IsPenalizable())
+                {
+                    penalty += bp.GetBoundsPenalty();
+                    jointCnt++;
+                }
+            }
+            if (jointCnt > 0)
+                penalty /= jointCnt;
+            vel_reward += Mathf.Log(1 - penalty);
         }
 
         return vel_reward;

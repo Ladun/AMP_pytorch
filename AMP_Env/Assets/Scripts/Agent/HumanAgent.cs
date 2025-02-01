@@ -97,6 +97,7 @@ public class HumanAgent : Agent
 
     public override void CollectObservations(VectorSensor sensor)
     {
+        skeleton.UpdateObs();
         Skeleton.Observastion obs = skeleton.Obs;
 
         for(int i = 0; i < obs.normals.Count; i++)

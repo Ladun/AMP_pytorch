@@ -65,6 +65,24 @@ namespace AMP
     }
     public class Utils
     {
+        public static float FMod(float a, float b)
+        {
+            return a - b * Mathf.Floor(a / b);
+        }
+
+        public static float NormlaizeAngle(float theta)
+        {
+            float normTheta = FMod(theta, 2 * Mathf.PI);
+            if (normTheta > Mathf.PI)
+            {
+                normTheta = -2 * Mathf.PI + normTheta;
+            }
+            else if (normTheta < -Mathf.PI)
+            {
+                normTheta = 2 * Mathf.PI + normTheta;
+            }
+            return normTheta;
+        }
 
         public static bool VectorValidate(Vector3 value)
         {
