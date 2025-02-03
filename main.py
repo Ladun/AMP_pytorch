@@ -41,7 +41,7 @@ def main():
     # Setting logging
     logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
                         datefmt='%m/%d/%Y %H:%M:%S',
-                        level=logging.INFO,
+                        level=logging.DEBUG,
                         handlers=[logging.StreamHandler()])
     logging.info(f"Description: {args.desc}")
 

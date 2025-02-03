@@ -78,7 +78,8 @@ class VertorizedUnityEnv(gym.Env):
             base_port = UnityEnvironment.DEFAULT_EDITOR_PORT
             no_graphics = True
 
-        print(f"Load env from {'editor'if env_filename is None else env_filename}")
+        no_graphics = True
+        logger.info(f"Load env from {'editor'if env_filename is None else env_filename}")
         channel = EngineConfigurationChannel()
         self._env = UnityEnvironment(env_filename, worker_id, base_port, no_graphics=no_graphics, side_channels=[channel])
         if not no_graphics:

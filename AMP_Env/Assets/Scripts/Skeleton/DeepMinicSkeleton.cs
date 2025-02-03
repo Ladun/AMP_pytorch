@@ -250,7 +250,6 @@ namespace AMP
                 xDrive.lowerLimit = joint.limLow.x * Mathf.Rad2Deg- euler.x;
                 xDrive.upperLimit = joint.limHigh.x * Mathf.Rad2Deg - euler.x;
                 xDrive.forceLimit = joint.torqueLim;
-                xDrive.damping = 200;
                 ab.xDrive = xDrive;
 
                 ArticulationDrive yDrive = ab.yDrive;
@@ -258,7 +257,6 @@ namespace AMP
                 yDrive.lowerLimit = joint.limLow.y * Mathf.Rad2Deg - euler.y;
                 yDrive.upperLimit = joint.limHigh.y * Mathf.Rad2Deg - euler.y;
                 yDrive.forceLimit = joint.torqueLim;
-                yDrive.damping = 200;
                 ab.yDrive = yDrive;
 
                 ArticulationDrive zDrive = ab.zDrive;
@@ -266,7 +264,6 @@ namespace AMP
                 zDrive.lowerLimit = joint.limLow.z * Mathf.Rad2Deg - euler.z;
                 zDrive.upperLimit = joint.limHigh.z * Mathf.Rad2Deg - euler.z;
                 zDrive.forceLimit = joint.torqueLim;
-                zDrive.damping = 200;
                 ab.zDrive = zDrive;
 
                 ab.jointType = ArticulationJointType.SphericalJoint;
@@ -367,7 +364,7 @@ namespace AMP
                         valid = false;
                     }
                     else
-                        observastion.linearVels.Add(ab.linearVelocity);
+                        observastion.linearVels.Add(root.InverseTransformDirection(ab.linearVelocity));
 
                     // Calc angular velocity
                     if (!Utils.VectorValidate(ab.angularVelocity))
@@ -376,7 +373,7 @@ namespace AMP
                         valid = false;
                     }
                     else
-                        observastion.angularVels.Add(ab.angularVelocity);
+                        observastion.angularVels.Add(root.InverseTransformDirection(ab.angularVelocity));
                 }
                 else
                 {

@@ -72,13 +72,15 @@ public class TargetHeadingEnv : TrainingEnv
             {
                 if(bp.IsPenalizable())
                 {
-                    penalty += bp.GetBoundsPenalty();
+                    penalty += Mathf.Log(1 - bp.GetBoundsPenalty());
+                    //penalty += bp.GetBoundsPenalty();
                     jointCnt++;
                 }
             }
             if (jointCnt > 0)
                 penalty /= jointCnt;
-            vel_reward += Mathf.Log(1 - penalty);
+            //vel_reward += Mathf.Log(1 - penalty);
+            vel_reward += penalty;
         }
 
         return vel_reward;

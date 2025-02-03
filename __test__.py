@@ -334,21 +334,33 @@ def actor_test_for_onnx():
 # loss_test()
 
 
-unity_env_test()
+# unity_env_test()
 
 # motion_dataset_test()
 
 # actor_test_for_onnx()
 
-# timer_manager = TimerManager()
 
-# with timer_manager.get_timer("Dataset test"):
-#     motion_dataset_test();    
-    
-# for k, v in timer_manager.timers.items():
-#     print(f"\t {k} time: {round(v.clear(), 5)} sec")
+env_path = "AMP_Env/Builds/ArticulationBodyHeading/ArticulationBodyHeading"
 
-# a = [1]
-# a += [2]
-# print(a)
-
+if not (glob.glob(env_path) or glob.glob(env_path + ".*")):
+    print("None")
+cwd = os.getcwd()
+launch_string = None
+true_filename = os.path.basename(os.path.normpath(env_path))
+candidates = glob.glob(os.path.join(cwd, env_path + ".exe"))
+print(candidates)
+if len(candidates) == 0:
+    candidates = glob.glob(env_path + ".exe")
+if len(candidates) == 0:
+    # Look for e.g. 3DBall\UnityEnvironment.exe
+    crash_handlers = set(
+        glob.glob(os.path.join(cwd, env_path, "UnityCrashHandler*.exe"))
+    )
+    candidates = [
+        c
+        for c in glob.glob(os.path.join(cwd, env_path, "*.exe"))
+        if c not in crash_handlers
+    ]
+if len(candidates) > 0:
+    launch_string = candidates[0]

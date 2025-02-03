@@ -128,6 +128,7 @@ namespace AMP
 
         public float GetBoundsPenalty()
         {
+            const float PENALTY = 0.9f;
             float penalty = 0;
             if (ab.jointType == ArticulationJointType.SphericalJoint)
             {
@@ -135,19 +136,19 @@ namespace AMP
                 if(ab.twistLock == ArticulationDofLock.LimitedMotion)
                 {
                     if (ab.xDrive.target < ab.xDrive.lowerLimit || ab.xDrive.target > ab.xDrive.upperLimit)
-                        penalty += 1;
+                        penalty += PENALTY;
                     cnt++;
                 }
                 if (ab.swingYLock == ArticulationDofLock.LimitedMotion)
                 {
                     if (ab.yDrive.target < ab.yDrive.lowerLimit || ab.yDrive.target > ab.yDrive.upperLimit)
-                        penalty += 1;
+                        penalty += PENALTY;
                     cnt++;
                 }
                 if (ab.swingZLock == ArticulationDofLock.LimitedMotion)
                 {
                     if (ab.zDrive.target < ab.zDrive.lowerLimit || ab.zDrive.target > ab.zDrive.upperLimit)
-                        penalty += 1;
+                        penalty += PENALTY;
                     cnt++;
                 }
                 if (cnt > 0)
@@ -158,7 +159,7 @@ namespace AMP
                 if (ab.twistLock == ArticulationDofLock.LimitedMotion)
                 {
                     if (ab.xDrive.target < ab.xDrive.lowerLimit || ab.xDrive.target > ab.xDrive.upperLimit)
-                        penalty += 1;
+                        penalty += PENALTY;
                 }
             }
             return penalty;

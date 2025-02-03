@@ -107,18 +107,6 @@ namespace AMP
                 angle += 360;
             return angle;
         }
-        public static string ReadTextFile(Object file)
-        {
-            if(file == null)
-            {
-                Debug.LogWarning("File not assigned!");
-                return "";
-            }
-
-            string filePath = AssetDatabase.GetAssetPath(file);
-
-            return ReadTextFile(filePath);
-        }
 
         public static string ReadTextFile(string filePath)
         {

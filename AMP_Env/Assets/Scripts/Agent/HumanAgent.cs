@@ -106,7 +106,7 @@ public class HumanAgent : Agent
             sensor.AddObservation(obs.normals[i]);
             sensor.AddObservation(obs.tangents[i]);
             sensor.AddObservation(obs.linearVels[i]);
-            sensor.AddObservation(obs.angularVels[i]);
+            //sensor.AddObservation(obs.angularVels[i]);
         }
 
         var goals = env.GetGoals(skeleton);

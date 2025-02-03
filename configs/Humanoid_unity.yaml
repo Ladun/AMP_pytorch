@@ -1,7 +1,7 @@
 device: "cuda"
 seed: 77
 env:
-    env_name: null
+    env_name: "AMP_Env/Builds/TargetHeading/TargetHeading"
     num_envs: 10
     state_dim: 225
     goal_dim: 3
