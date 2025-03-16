@@ -1,20 +1,13 @@
 # AMP_pytorch
-Adversarial Model Prior pytorch implementation using pybullet
+Adversarial Model Prior pytorch implementation using Unity ML-agent environment.
 
+In this project, we implement the reinforcement learning algorithm ourselves, and we use Unity solely for the environment.
 
 # Prepare data
 
-In this project, we use the [CMU motion capture](http://mocap.cs.cmu.edu/) data for training AMP
-## Download
+In this project, we use the [DeepMimic](https://github.com/xbpeng/DeepMimic) data for training AMP
 
-```
-python tools/download_motion_data.py
-```
-## Test
-
-```
-python -m tools.mocap_player_for_mujoco --asf_file=data/asf/02.asf --amc_file=data/walk/02_01.amc
-```
+DeepMimic motion data can be obtained from GitHub, and the path is [All Data](https://github.com/xbpeng/DeepMimic/tree/master/data).
 
 # Training
 
