@@ -312,6 +312,7 @@ namespace AMP
                 {
                     joint.localRotation = new Quaternion(values[1], values[2], values[3], values[0]);
                     euler = joint.localRotation.eulerAngles;
+
                 }
                 else if(values.Count == 1)
                 {

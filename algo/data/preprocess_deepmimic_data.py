@@ -29,8 +29,8 @@ def get_disc_motion_dim(skeleton_info):
     
     dofs = DOFS["Humanoid"]
     dim = 0    
-    dim += 6
-    dim += len(dofs[2:]) * 12
+    dim += 3 # root vel
+    dim += len(dofs[2:]) * 9 # joints info
     dim += len( skeleton_info["end_effector_id"]) * 3
     
     return dim
@@ -91,16 +91,16 @@ def parse_motion_file(path, skeleton_info) -> np.array:
         if i == 0:
             # 1. root linear velocity
             obs.append(np.array((0, 0, 0)))
-            # 2. root angular velocity
-            obs.append(np.array((0, 0, 0)))
+            # # 2. root angular velocity
+            # obs.append(np.array((0, 0, 0)))
         else:
             prev_joints = all_frames[i - 1]            
             duration = prev_joints[-1]
             
             # 1. root linear velocity
             obs.append((cur_joints[0][:3] - prev_joints[0][:3]) /  duration)
-            # 2. root angular velocity
-            obs.append(get_angular_vel(cur_joints[0][3:7], prev_joints[0][3:7], duration))
+            # # 2. root angular velocity
+            # obs.append(get_angular_vel(cur_joints[0][3:7], prev_joints[0][3:7], duration))
         
         # root position and rotation
         positions[0] = calc_cur_pos(0, positions, rotations, skeleton_info)
@@ -129,8 +129,8 @@ def parse_motion_file(path, skeleton_info) -> np.array:
             if i == 0:
                 # 5. linear velocity
                 obs.append(np.array((0, 0, 0)))
-                # 6. angular velocity
-                obs.append(np.array((0, 0, 0)))
+                # # 6. angular velocity
+                # obs.append(np.array((0, 0, 0)))
             else:
                 prev_joints = all_frames[i - 1]
                 duration = prev_joints[-1] # prev_joints is not list, it is dictionary
@@ -139,8 +139,8 @@ def parse_motion_file(path, skeleton_info) -> np.array:
                 # Calculate velocity
                 # 5. linear velocity
                 obs.append((cur_pos - prev_pos) /  duration)
-                # 6. angular velocity
-                obs.append(get_angular_vel(get_rotation(cur_j), get_rotation(prev_joints[key]), duration))
+                # # 6. angular velocity
+                # obs.append(get_angular_vel(get_rotation(cur_j), get_rotation(prev_joints[key]), duration))
         
         # 7. end effector position
         for key in skeleton_info["end_effector_id"]:

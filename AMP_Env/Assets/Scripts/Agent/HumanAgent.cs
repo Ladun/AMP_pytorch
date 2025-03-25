@@ -6,6 +6,7 @@ using Unity.MLAgents.Actuators;
 using Unity.MLAgents.Sensors;
 using AMP;
 using Unity.VisualScripting;
+using Unity.MLAgents.Policies;
 
 public class HumanAgent : Agent
 {
@@ -18,15 +19,25 @@ public class HumanAgent : Agent
     private Transform root;
     private ArticulationBodyController controller;
 
+    public float timeToAgentDoneOnGroundContact = 2f;
     public int[] doneByContactJointIds;
 
+    public bool applyLastAction = true;
+    public float action_stiffness_hyperparam = 0.2f;
+
     private Vector3 initPos;
+    private int numActions;
+    private float[] smoothedActions;
+
+
 
     #region MLAgents function
     public override void Initialize()
     {
         if(motionDatabase == null)
             motionDatabase = FindFirstObjectByType<MotionDatabase>();
+
+        numActions = GetComponent<BehaviorParameters>().BrainParameters.ActionSpec.NumContinuousActions;
 
         motionDatabase.LoadDataset(false);
         controller = GetComponent<ArticulationBodyController>();
@@ -54,7 +65,7 @@ public class HumanAgent : Agent
 
             t.agentDoneOnGroundContact = true;
             t.penalizeGroundContact = true;
-            t.groundContactPenalty = -1;
+            t.groundContactPenalty = -2;
         }
     }
 
@@ -70,6 +81,9 @@ public class HumanAgent : Agent
         controller.bodyPartsDict[0].ab.TeleportRoot(initPos, randomRot);
 
         var motionData = motionDatabase.GetRandomMotionData();
+
+        smoothedActions = new float[numActions];
+        int actionIdx = 0;
         foreach (var ent in controller.bodyPartsDict)
         {
             var key = ent.Key;
@@ -80,15 +94,33 @@ public class HumanAgent : Agent
             {
                 var values = motionData.JointData[key];
                 if (values.Count == 4)
-                { 
-                    euler = Utils.NormalizeAngle(new Quaternion(values[1], values[2], values[3], values[0]).eulerAngles);
+                {
+                    Quaternion q = new Quaternion(values[1], values[2], values[3], values[0]);
+                    euler = Utils.NormalizeAngle(q.eulerAngles);
+
+                    // Set initial pose action
+                    Vector3 expMap = Utils.ExpToQuat(q);
+                    smoothedActions[actionIdx] = expMap.x;
+                    smoothedActions[actionIdx + 1] = expMap.y;
+                    smoothedActions[actionIdx + 2] = expMap.z;
+                    actionIdx += 3;
                 }
                 else if (values.Count == 1)
                 {
                     euler = Utils.NormalizeAngle(Quaternion.Euler(0, 0, values[0] * Mathf.Rad2Deg).eulerAngles);
+
+                    // Set initial pose action
+                    smoothedActions[actionIdx++] = values[0];
                 }
             }
             bodyPart.Reset(euler);
+        }
+
+        var joints = skeleton.GetJoints();
+        for (int i = 0; i < doneByContactJointIds.Length; i++)
+        {
+            var t = joints[doneByContactJointIds[i]].GetComponent<GroundContact>();
+            t.timeToAgentDoneOnGroundContact = timeToAgentDoneOnGroundContact;
         }
 
         skeleton.UpdateObs();
@@ -106,7 +138,7 @@ public class HumanAgent : Agent
             sensor.AddObservation(obs.normals[i]);
             sensor.AddObservation(obs.tangents[i]);
             sensor.AddObservation(obs.linearVels[i]);
-            //sensor.AddObservation(obs.angularVels[i]);
+            sensor.AddObservation(obs.angularVels[i]);
         }
 
         var goals = env.GetGoals(skeleton);
@@ -146,9 +178,14 @@ public class HumanAgent : Agent
 
     public override void OnActionReceived(ActionBuffers actionBuffers)
     {
-        var continuousAct = actionBuffers.ContinuousActions;
-        var i = -1;
+        var continuousAct = actionBuffers.ContinuousActions.Array;
 
+        int i;
+        if (applyLastAction)
+            for (i = 0; i < numActions; i++)
+                smoothedActions[i] = (1 - action_stiffness_hyperparam) * smoothedActions[i] + action_stiffness_hyperparam * continuousAct[i];
+
+        i = -1;
         for (int idx = 1; idx < controller.bodyPartsList.Count; idx++)
         {
             // Spherical하고 Revoluate 관절 구분하기.
@@ -162,13 +199,13 @@ public class HumanAgent : Agent
                 List<float> f = new List<float>();
                 if (ab.jointType != ArticulationJointType.FixedJoint)
                 {
-                    f.Add(continuousAct[++i]);
+                    f.Add(smoothedActions[++i]);
                     if (ab.jointType == ArticulationJointType.SphericalJoint)
                     {
-                        f.Add(continuousAct[++i]);
-                        f.Add(continuousAct[++i]);
+                        f.Add(smoothedActions[++i]);
+                        f.Add(smoothedActions[++i]);
                     }
-                    bodyPart.SetJointTargetFromRotVector(f);
+                    bodyPart.SetJointTargetFromExpMap(f);
                 }
             }
             else
@@ -210,19 +247,19 @@ public class HumanAgent : Agent
 
         if (controller.bodyPartsList.Count > 0)
         {
-            var joints = skeleton.GetJoints();
-            var left_ankle = joints[11];
-            var right_ankle = joints[5];
-            var neck = joints[2];
+            //var joints = skeleton.GetJoints();
+            //var left_ankle = joints[11];
+            //var right_ankle = joints[5];
+            //var neck = joints[2];
 
-            var ankle_mid = (left_ankle.position + right_ankle.position) / 2;
-            var ankle_to_neck = (neck.position - ankle_mid).normalized;
-            if (Vector3.Angle(Vector3.up, ankle_to_neck) > 50)
-            {
-                SetReward(-1f);
-                EndEpisode();
-            }
-            else
+            //var ankle_mid = (left_ankle.position + right_ankle.position) / 2;
+            //var ankle_to_neck = (neck.position - ankle_mid).normalized;
+            //if (Vector3.Angle(Vector3.up, ankle_to_neck) > 50)
+            //{
+            //    SetReward(-1f);
+            //    EndEpisode();
+            //}
+            //else
             {
 
                 AddReward(env.GetReward(controller));

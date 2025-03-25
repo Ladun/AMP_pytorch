@@ -15,27 +15,43 @@ namespace AMP
 
         [Header("Ground Check")] 
         public bool agentDoneOnGroundContact; // Whether to reset agent on ground contact.
+        public float timeToAgentDoneOnGroundContact = 0f;
+
         public bool penalizeGroundContact; // Whether to penalize on contact.
         public float groundContactPenalty; // Penalty amount (ex: -1).
         public bool touchingGround;
-        const string k_Ground = "ground"; // Tag of ground object.
+        const string groundTag = "ground"; // Tag of ground object.
+
 
         /// <summary>
         /// Check for collision with ground, and optionally penalize agent.
         /// </summary>
         void OnCollisionEnter(Collision col)
         {
-            if (col.transform.CompareTag(k_Ground))
+            if (col.transform.CompareTag(groundTag))
             {
                 touchingGround = true;
                 if (penalizeGroundContact)
                 {
                     agent.SetReward(groundContactPenalty);
                 }
+            }
+        }
 
+        private void OnCollisionStay(Collision col)
+        {
+            if (col.transform.CompareTag(groundTag))
+            {
                 if (agentDoneOnGroundContact)
                 {
-                    agent.EndEpisode();
+                    if (timeToAgentDoneOnGroundContact > 0)
+                    {
+                        timeToAgentDoneOnGroundContact -= Time.deltaTime;
+                    }
+                    else
+                    {
+                        agent.EndEpisode();
+                    }
                 }
             }
         }
@@ -45,7 +61,7 @@ namespace AMP
         /// </summary>
         void OnCollisionExit(Collision other)
         {
-            if (other.transform.CompareTag(k_Ground))
+            if (other.transform.CompareTag(groundTag))
             {
                 touchingGround = false;
             }

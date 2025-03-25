@@ -17,6 +17,9 @@ public class Test : MonoBehaviour
     private ArticulationBodyController controller;
     private Vector3 initPos;
 
+    public int bodyIdx = 0;
+    public Vector3 targetRot = Vector3.zero;
+
 
     private void Awake()
     {
@@ -146,8 +149,8 @@ public class Test : MonoBehaviour
                 }
             }
         }
-
         // Articulation Body Test
+        // Set animation motion
         if (Input.GetKeyDown(KeyCode.I))
         {
             if (!skeleton.HasSkeleton())

@@ -65,6 +65,80 @@ namespace AMP
     }
     public class Utils
     {
+        public static Quaternion QuatToExp(Vector3 v, float maxLen, float eps = 1e-8f)
+        {
+            float len = Mathf.Sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+            if (len > maxLen)
+            {
+                v *= maxLen / len;
+            }
+
+            // ExpMapToQuaternion
+            float theta = v.magnitude;
+            float outTheta = 0;
+            Vector3 outAxis = new Vector3(0, 0, 1);
+            if (theta > 1e-6)
+            {
+                outAxis = v / theta;
+                outTheta = NormlaizeAngle(theta);
+            }
+
+            float c = Mathf.Cos(outTheta / 2);
+            float s = Mathf.Sin(outTheta / 2);
+            Quaternion quat = new Quaternion(
+                    s * outAxis.x,
+                    s * outAxis.y,
+                    s * outAxis.z,
+                    c);
+
+            return quat;
+        }
+        public static Vector3 ExpToQuat(Quaternion q)
+        {
+            float mag = Mathf.Sqrt(q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w);
+            if (Mathf.Abs(mag - 1.0f) > 1e-6f)
+            {
+                q = q.normalized;
+            }
+
+            // 회전각 theta = 2 * acos(w)
+            float angle = 2.0f * Mathf.Acos(q.w);
+
+            // sin(theta/2) 계산
+            float s = Mathf.Sqrt(1.0f - q.w * q.w);
+
+            // 수치적 안정성을 위한 임계값
+            const float epsilon = 1e-6f;
+            if (s < epsilon)
+            {
+                // 회전각이 거의 0인 경우 (또는 매우 작은 각도), 벡터 부분 그대로 반환
+                return new Vector3(q.x, q.y, q.z);
+            }
+            else
+            {
+                // 회전축 계산: (x, y, z) / sin(theta/2)
+                Vector3 axis = new Vector3(q.x / s, q.y / s, q.z / s);
+                // exp-map은 회전축에 회전각을 곱한 값
+                return axis * angle;
+            }
+        }
+
+        public static Quaternion quat_exp(Vector3 v, float eps = 1e-8f)
+        {
+            float halfangle = Mathf.Sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+
+            if (halfangle < eps)
+            {
+                return Quaternion.Normalize(new Quaternion(v.x, v.y, v.z, 1.0f));
+            }
+            else
+            {
+                float c = Mathf.Cos(halfangle);
+                float s = Mathf.Sin(halfangle) / halfangle;
+                return new Quaternion(s * v.x, s * v.y, s * v.z, c);
+            }
+        }
+
         public static float FMod(float a, float b)
         {
             return a - b * Mathf.Floor(a / b);

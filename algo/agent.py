@@ -233,7 +233,7 @@ class AMPAgent:
             amp_algo.goal_normalizer.load(ckpt_path)
 
         # load random state
-        set_rng_state(torch.load(os.path.join(ckpt_path, 'rng_state.pkl'), map_location='cpu'))
+        set_rng_state(torch.load(os.path.join(ckpt_path, 'rng_state.pkl'), map_location='cpu', weights_only=False))
 
         with open(os.path.join(ckpt_path, "appendix"), "r") as f:
             lines = f.readlines()
@@ -433,9 +433,13 @@ class AMPAgent:
         
         # shape of observastion from env
         # [[pos_i, nor_i, tan_i, lin_vel_i, ang_vel_i] for i in range(15)]
+        # [[pos_i, nor_i, tan_i, lin_vel_i] for i in range(15)]
+        num_of_features = 4
+        dim_of_feat = 3
+        
         def get_data_by_id(d, id):
-            p = 5 * 3 * id
-            return d[:, p: p + 5 * 3]
+            p = num_of_features * dim_of_feat * id
+            return d[:, p: p + num_of_features * dim_of_feat]
         
         obs = []
         end_effector_id = self.skeleton_info["end_effector_id"]
@@ -443,8 +447,8 @@ class AMPAgent:
         
         # 1. root linear velocity
         obs.append(get_data_by_id(data, 0)[:, 9:12])
-        # 2. root angular velocity
-        obs.append(get_data_by_id(data, 0)[:, 12:15])
+        # # 2. root angular velocity
+        # obs.append(get_data_by_id(data, 0)[:, 12:15])
         
         for key, _ in dofs[2:]:
             # 3. normal vector
@@ -453,8 +457,8 @@ class AMPAgent:
             obs.append(get_data_by_id(data, key)[:, 6:9])
             # 5. linear velocity
             obs.append(get_data_by_id(data, key)[:, 9:12])
-            # 6. angular velocity
-            obs.append(get_data_by_id(data, key)[:, 12:15]) 
+            # # 6. angular velocity
+            # obs.append(get_data_by_id(data, key)[:, 12:15]) 
             
         # 7. end effector position
         for key in end_effector_id:
@@ -482,7 +486,10 @@ class AMPAgent:
         
         metrics = defaultdict(list)
         
-        with self.timer_manager.get_timer("Backpropagation"):                
+        with self.timer_manager.get_timer("Backpropagation"):  
+            
+            # ---------- GAIL Update --------------
+                          
             if self.config.train.gail.use:
                 for _ in range(self.config.train.gail.epochs):
                     with self.timer_manager.get_timer("Prepare data for discriminator"):  
@@ -493,6 +500,8 @@ class AMPAgent:
                     
                     for k, v in disc_metric.items():
                         metrics[k].extend(v)
+                        
+            # ---------- PPO Update --------------
                     
             for _ in range(self.config.train.ppo.epochs):
                 with self.timer_manager.get_timer("Policy optimize per epoch"):  

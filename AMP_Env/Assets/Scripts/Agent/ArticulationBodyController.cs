@@ -68,36 +68,14 @@ namespace AMP
             }
         }
 
-        public void SetJointTargetFromRotVector(List<float> f)
+        public void SetJointTargetFromExpMap(List<float> f)
         {
             const float maxLen = gMaxPDExpVal;
 
             if (ab.jointType == ArticulationJointType.SphericalJoint)
             {
                 Vector3 exp_map = new Vector3(f[0], f[1], f[2]);
-                float len = exp_map.magnitude;
-                if(len > maxLen)
-                {
-                    exp_map *= maxLen / len;
-                }
-
-                // ExpMapToQuaternion
-                float theta = exp_map.magnitude;
-                float outTheta = 0;
-                Vector3 outAxis = new Vector3(0, 0, 1);
-                if(theta > 1e-6)
-                {
-                    outAxis = exp_map / theta;
-                    outTheta = Utils.NormlaizeAngle(theta);
-                }
-
-                float c = Mathf.Cos(outTheta / 2);
-                float s = Mathf.Sin(outTheta / 2);
-                Quaternion quat = new Quaternion(
-                        s * outAxis.x,
-                        s * outAxis.y,
-                        s * outAxis.z,
-                        c);
+                Quaternion quat = Utils.QuatToExp(exp_map, maxLen);
 
                 ab.SetDriveRotation(quat);
             }

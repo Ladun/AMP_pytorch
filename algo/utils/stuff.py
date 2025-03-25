@@ -63,7 +63,7 @@ class Normalizer:
 
     def load(self, base_path):
         load_path = os.path.join(base_path, f"{self.name}_normalizer.pth")
-        self.rms.load_variables(torch.load(load_path))
+        self.rms.load_variables(torch.load(load_path, weights_only=False))
 
 
 # Reward scaler
@@ -88,5 +88,5 @@ class RewardScaler:
 
     def load(self, base_path):
         load_path = os.path.join(base_path, "reward_scaler.pth")
-        self.rms.load_variables(torch.load(load_path))
+        self.rms.load_variables(torch.load(load_path, weights_only=False))
         

@@ -58,11 +58,8 @@ public class TargetHeadingEnv : TrainingEnv
         float avg_speed = Vector3.Dot(targetDir, cmv);
 
         float vel_reward = 0;
-        if (avg_speed > 0)
-        {
-            float vel_err = targetSpeed - avg_speed;
-            vel_reward = Mathf.Exp(-velRewardScale * vel_err * vel_err); 
-        }
+        float vel_err = targetSpeed - avg_speed;
+        vel_reward = Mathf.Exp(-velRewardScale * vel_err * vel_err); 
 
         if(usingArticulationPenalty)
         {

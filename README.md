@@ -3,6 +3,9 @@ Adversarial Model Prior pytorch implementation using Unity ML-agent environment.
 
 In this project, we implement the reinforcement learning algorithm ourselves, and we use Unity solely for the environment.
 
+**This python code can be used in [Unity ML-agent examples](https://github.com/Unity-Technologies/ml-agents/blob/develop/docs/Learning-Environment-Examples.md)**. You can use it instead of `mlagents-learn`.
+
+
 # Prepare data
 
 In this project, we use the [DeepMimic](https://github.com/xbpeng/DeepMimic) data for training AMP
@@ -14,7 +17,6 @@ DeepMimic motion data can be obtained from GitHub, and the path is [All Data](ht
 ``` 
 python main.py --train --config=configs/Humanoid.yaml
 ```
-
 ## resume
 ```
 python main.py --train --experiment_path=<experiment_path> --load_postfix=<best or timesteps000000>

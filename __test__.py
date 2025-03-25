@@ -13,7 +13,7 @@ import torch
 from torch import nn
 from torch.utils.data.sampler import WeightedRandomSampler
 
-import gymnasium as gym
+import gymnasium as gymte
 from gymnasium.vector import AsyncVectorEnv
 
 from algo.models.policy import Actor
