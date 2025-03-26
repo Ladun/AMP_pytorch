@@ -5,7 +5,7 @@ public static class ArtBodyExtension
 
     public static void SetDriveRotation(this ArticulationBody body, Quaternion targetLocalRotation)
     {
-        Vector3 target = body.ToTargetRotationInReducedSpace(targetLocalRotation, true);
+        Vector3 target = body.ToTargetRotationInReducedSpace(targetLocalRotation, true);       
 
         // assign to the drive targets...
         ArticulationDrive xDrive = body.xDrive;
@@ -26,9 +26,13 @@ public static class ArtBodyExtension
         if (body.isRoot)
             return Vector3.zero;
 
-        Quaternion q = Quaternion.Inverse(body.anchorRotation) * Quaternion.Inverse(targetLocalRotation) * body.parentAnchorRotation;
-        q.Normalize();
-        Vector3 TargetRotationInJointSpace = -q.eulerAngles;
+        //Quaternion q = Quaternion.Inverse(body.anchorRotation) * Quaternion.Inverse(targetLocalRotation) * body.parentAnchorRotation;
+        //q.Normalize();
+        //Vector3 TargetRotationInJointSpace = -q.eulerAngles;
+
+        Quaternion q = Quaternion.Inverse(body.parentAnchorRotation) * targetLocalRotation * Quaternion.Inverse(body.anchorRotation);
+        Vector3 TargetRotationInJointSpace = q.eulerAngles;
+
         TargetRotationInJointSpace = new Vector3(
             Mathf.DeltaAngle(0, TargetRotationInJointSpace.x),
             Mathf.DeltaAngle(0, TargetRotationInJointSpace.y),

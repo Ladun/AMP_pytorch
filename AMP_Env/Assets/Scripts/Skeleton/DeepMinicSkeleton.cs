@@ -307,17 +307,14 @@ namespace AMP
                 List<float> values = entry.Value;
                 Transform joint = jointTransforms[key];
 
-                Vector3 euler = Vector3.zero;
                 if (values.Count == 4)
                 {
                     joint.localRotation = new Quaternion(values[1], values[2], values[3], values[0]);
-                    euler = joint.localRotation.eulerAngles;
 
                 }
                 else if(values.Count == 1)
                 {
                     joint.localRotation = Quaternion.Euler(0, 0, values[0] * Mathf.Rad2Deg);
-                    euler.x = values[0] * Mathf.Rad2Deg;
                 }
                 else
                 {

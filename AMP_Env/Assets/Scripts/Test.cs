@@ -7,9 +7,13 @@ using static UnityEngine.GraphicsBuffer;
 
 public class Test : MonoBehaviour
 {
-    public DeepMinicSkeleton skeleton;
-    public DeepMinicSkeleton testSkeleton;
+    public DeepMinicSkeleton physicsSkeleton;
+    public DeepMinicSkeleton animationTestSkeleton;
     public MotionDatabase motionDatabase;
+
+    public bool useRandomRotation = false;
+
+    [Space(10)]
 
     public Direction testDir;
     public Vector2 testVec;
@@ -17,24 +21,20 @@ public class Test : MonoBehaviour
     private ArticulationBodyController controller;
     private Vector3 initPos;
 
-    public int bodyIdx = 0;
-    public Vector3 targetRot = Vector3.zero;
-
-
     private void Awake()
     {
-        if(testSkeleton)
-            testSkeleton.CreateSkeleton();
+        if(animationTestSkeleton)
+            animationTestSkeleton.CreateSkeleton();
 
 
-        skeleton.CreateSkeleton();
-        skeleton.ConfigureJoints();
-        var joints = skeleton.GetJoints();
+        physicsSkeleton.CreateSkeleton();
+        physicsSkeleton.ConfigureJoints();
+        var joints = physicsSkeleton.GetJoints();
         var root = joints[0];
 
         root.GetComponent<ArticulationBody>().immovable = true;
 
-        controller = skeleton.transform.GetComponent<ArticulationBodyController>();
+        controller = physicsSkeleton.transform.GetComponent<ArticulationBodyController>();
         for (int key = 0; key < joints.Count; key++)
         {
             controller.SetupBodyPart(key, joints[key]);
@@ -69,7 +69,7 @@ public class Test : MonoBehaviour
     {  // Configurable Joint Test
         if (Input.GetKeyDown(KeyCode.U))
         {
-            var jointTransforms = skeleton.GetJoints();
+            var jointTransforms = physicsSkeleton.GetJoints();
             foreach (var joint in jointTransforms)
             {
                 ConfigurableJoint cj = joint.GetComponent<ConfigurableJoint>();
@@ -83,10 +83,10 @@ public class Test : MonoBehaviour
             if (!motionDatabase.HasMotion)
                 motionDatabase.LoadDataset();
 
-            var jointTransforms = skeleton.GetJoints();
+            var jointTransforms = physicsSkeleton.GetJoints();
             //var motionData = motionDatabase.GetMotionData(motionDatabase.GetMotionKeys()[0])[0];
             var motionData = motionDatabase.GetRandomMotionData();
-            skeleton.SetAnimationData(motionData, true, true);
+            physicsSkeleton.SetAnimationData(motionData, true, true);
 
             foreach (var motion in motionData.JointData)
             {
@@ -128,7 +128,7 @@ public class Test : MonoBehaviour
     {
         if (Input.GetKeyDown(KeyCode.U))
         {
-            var jointTransforms = skeleton.GetJoints();
+            var jointTransforms = physicsSkeleton.GetJoints();
             foreach (var joint in jointTransforms)
             {
                 ArticulationBody ab = joint.GetComponent<ArticulationBody>();
@@ -153,10 +153,10 @@ public class Test : MonoBehaviour
         // Set animation motion
         if (Input.GetKeyDown(KeyCode.I))
         {
-            if (!skeleton.HasSkeleton())
+            if (!physicsSkeleton.HasSkeleton())
             {
-                skeleton.CreateSkeleton();
-                skeleton.ConfigureJoints();
+                physicsSkeleton.CreateSkeleton();
+                physicsSkeleton.ConfigureJoints();
                 Debug.Log("Create new skeleton");
             }
 
@@ -164,13 +164,15 @@ public class Test : MonoBehaviour
                 motionDatabase.LoadDataset();
 
             var motionData = motionDatabase.GetRandomMotionData();
-            testSkeleton.SetAnimationData(motionData, true, true);
+            animationTestSkeleton.SetAnimationData(motionData, true, true);
 
-            var jointTransforms = skeleton.GetJoints();
+            var jointTransforms = physicsSkeleton.GetJoints();
 
             if (Input.GetKey(KeyCode.L))
             {
-                var randomRot = Quaternion.Euler(0, Random.Range(0.0f, 360.0f), 0);
+                Quaternion randomRot = Quaternion.identity;
+                if (useRandomRotation)
+                    randomRot = Quaternion.Euler(0, Random.Range(0.0f, 360.0f), 0);
                 controller.bodyPartsDict[0].ab.TeleportRoot(initPos, randomRot);
                 foreach (var ent in controller.bodyPartsDict)
                 {
@@ -206,7 +208,7 @@ public class Test : MonoBehaviour
                     {
                         if (ab.isRoot && !ab.immovable)
                         {
-                            Vector3 pos = new Vector3(values[0], values[1], values[2]) * skeleton.lengthScale;
+                            Vector3 pos = new Vector3(values[0], values[1], values[2]) * physicsSkeleton.lengthScale;
                             euler = Utils.NormalizeAngle(new Quaternion(values[4], values[5], values[6], values[3]).eulerAngles);
                             ab.TeleportRoot(pos, Quaternion.Euler(euler));
                         }
